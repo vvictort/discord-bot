@@ -15,13 +15,12 @@ The project is built around a cheap-first detection pipeline:
 
 ## Tech stack
 
-- Python 3.10+ with modern type hints and dataclasses.
+- Python 3.10-3.12 with the current `discord.py` dependency.
 - `discord.py` for Discord gateway events and slash commands.
 - `python-dotenv` for local `.env` configuration.
-- `scikit-learn` for TF-IDF features, template similarity, and Logistic Regression.
-- `pandas`, `numpy`, and `joblib` for training data, metrics, and model artifacts.
-- Hugging Face `datasets` and `huggingface-hub` for bootstrap dataset loading.
 - SQLite through Python's standard `sqlite3` module for feedback storage.
+- Optional ML/training stack: `scikit-learn`, `pandas`, `numpy`, `joblib`,
+  Hugging Face `datasets`, and `huggingface-hub`.
 - `pytest` and `pytest-asyncio` for unit and async bot tests.
 
 ## Local setup
@@ -34,6 +33,18 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+```
+
+For training, template similarity, classifier inference, and dataset tools:
+
+```bash
+python -m pip install -r requirements-ml.txt
+```
+
+For the full test suite:
+
+```bash
+python -m pip install -r requirements-dev.txt
 ```
 
 Run tests:
@@ -56,6 +67,16 @@ Without activating the virtualenv, use:
 - `tests/`: unit and integration-style tests for runtime and training behavior.
 - `data/`: local raw/processed data, ignored by git.
 - `models/`: local trained model artifacts, ignored by git.
+
+## Dependency notes
+
+`audioop` is not imported by this codebase and is not listed in the project
+requirements. The deprecation warning comes from `discord.py`: importing
+`discord` imports its audio player module, and that module imports Python's
+stdlib `audioop` for voice helpers. This bot does not use Discord voice or
+audio playback. Python removed `audioop` in 3.13 after deprecating it in 3.11,
+so stay on Python 3.10-3.12 for this `discord.py` line or upgrade the Discord
+client dependency when it stops importing `audioop`.
 
 ## Runtime architecture
 

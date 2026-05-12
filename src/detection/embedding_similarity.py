@@ -5,9 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
 from src.scam_detector.preprocessing import normalize_message_text
 
 # This layer is intentionally lightweight: it uses local TF-IDF vectors as the
@@ -135,9 +132,7 @@ def compute_embedding_similarity(
             reasons=[],
         )
 
-    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))
-    matrix = vectorizer.fit_transform([normalized_message, *normalized_templates])
-    similarities = cosine_similarity(matrix[0:1], matrix[1:]).ravel()
+    similarities = _compute_tfidf_cosine_similarities(normalized_message, normalized_templates)
     best_index = int(similarities.argmax())
     max_similarity = float(similarities[best_index])
     matched_template = templates[best_index]
@@ -149,6 +144,15 @@ def compute_embedding_similarity(
         matched_category=matched_template.category,
         reasons=reasons,
     )
+
+
+def _compute_tfidf_cosine_similarities(message: str, templates: Sequence[str]):
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(3, 5))
+    matrix = vectorizer.fit_transform([message, *templates])
+    return cosine_similarity(matrix[0:1], matrix[1:]).ravel()
 
 
 def _similarity_reasons(max_similarity: float) -> list[str]:

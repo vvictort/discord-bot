@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pandas as pd
-
 
 @dataclass(frozen=True)
 class FeedbackRecord:
@@ -286,7 +284,9 @@ class FeedbackRepository:
             for row in rows
         ]
 
-    def to_training_frame(self) -> pd.DataFrame:
+    def to_training_frame(self):
+        import pandas as pd
+
         records = [
             record
             for record in self.list_records()
