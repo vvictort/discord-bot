@@ -18,12 +18,26 @@ class BotSettings:
     mod_review_channel_id: int | None = None
     delete_enabled: bool = True
     notify_log_actions: bool = True
+    whitelisted_role_ids: frozenset[int] = frozenset()
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_role_ids(value: str | None) -> frozenset[int]:
+    if not value:
+        return frozenset()
+
+    role_ids: set[int] = set()
+    for raw_role_id in value.split(","):
+        role_id = raw_role_id.strip()
+        if not role_id:
+            continue
+        role_ids.add(int(role_id))
+    return frozenset(role_ids)
 
 
 def load_bot_settings_from_env(env: Mapping[str, str] | None = None) -> BotSettings:
@@ -33,6 +47,7 @@ def load_bot_settings_from_env(env: Mapping[str, str] | None = None) -> BotSetti
         mod_review_channel_id=int(review_channel) if review_channel else None,
         delete_enabled=_parse_bool(values.get("BOT_DELETE_ENABLED"), default=True),
         notify_log_actions=_parse_bool(values.get("BOT_NOTIFY_LOG_ACTIONS"), default=True),
+        whitelisted_role_ids=_parse_role_ids(values.get("WHITELISTED_ROLE_IDS")),
     )
 
 
@@ -88,6 +103,7 @@ def build_message_context(message: discord.Message) -> MessageContext:
         has_link=("http://" in message.content.lower() or "https://" in message.content.lower()),
         has_mention=bool(message.mentions or message.mention_everyone),
         num_roles=max(len(member.roles) - 1, 0) if member else None,
+        author_role_ids=tuple(role.id for role in member.roles) if member else (),
     )
 
 
@@ -102,8 +118,11 @@ class ScamDetectionBot(discord.Client):
         intents.guilds = True
         intents.messages = True
         super().__init__(intents=intents)
-        self.pipeline = pipeline or DetectionPipeline(classifier=ScamClassifier())
         self.settings = settings or BotSettings()
+        self.pipeline = pipeline or DetectionPipeline(
+            classifier=ScamClassifier(),
+            whitelisted_role_ids=self.settings.whitelisted_role_ids,
+        )
 
     async def on_ready(self) -> None:
         print(f"Logged in as {self.user} (id={self.user.id if self.user else 'unknown'})")

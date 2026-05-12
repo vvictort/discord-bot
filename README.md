@@ -149,6 +149,7 @@ Create a local `.env` file:
 ```bash
 DISCORD_TOKEN=your-token-here
 MOD_REVIEW_CHANNEL_ID=your-mod-review-channel-id
+WHITELISTED_ROLE_IDS=admin-role-id,moderator-role-id
 ```
 
 Run the bot:
@@ -160,6 +161,7 @@ python -m src.scam_detector.bot
 Optional bot settings:
 
 - `MOD_REVIEW_CHANNEL_ID`: channel where log/review/delete events are posted.
+- `WHITELISTED_ROLE_IDS`: comma-separated role IDs that bypass scam detection.
 - `BOT_DELETE_ENABLED=false`: dry-run mode; detections are reported but messages are not deleted.
 - `BOT_NOTIFY_LOG_ACTIONS=false`: only review/delete events go to the mod channel.
 
@@ -168,6 +170,9 @@ For a private server, also check Discord configuration:
 1. In the Discord Developer Portal, enable the bot's privileged **Message Content Intent**.
 2. Invite the bot with permissions to view channels, read message history, send messages, and manage messages if you want auto-delete.
 3. Put `MOD_REVIEW_CHANNEL_ID` in `.env` while testing so suspicious messages are visible even when they are not deleted.
-4. Restart the bot after changing `.env` or Developer Portal settings.
+4. Add trusted admin/mod roles to `WHITELISTED_ROLE_IDS` so their messages bypass detection.
+5. Restart the bot after changing `.env` or Developer Portal settings.
 
 Most test scam messages will not auto-delete immediately. Medium confidence becomes `log`, high rule-only confidence becomes `review`, and auto-delete requires a classifier probability above the auto-delete threshold.
+
+To copy a role ID, enable Discord Developer Mode, open **Server Settings > Roles**, right-click the role, and choose **Copy Role ID**. Avoid whitelisting `@everyone`, because that bypasses detection for the whole server.

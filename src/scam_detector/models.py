@@ -16,6 +16,7 @@ class MessageContext:
     has_link: bool = False
     has_mention: bool = False
     num_roles: int | None = None
+    author_role_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
