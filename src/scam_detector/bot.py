@@ -18,6 +18,15 @@ from src.scam_detector.pipeline import DetectionPipeline, DetectionResult
 
 
 @dataclass(frozen=True)
+class ModerationLogPayload:
+    """Discord-ready payload for a moderator-facing detection snapshot."""
+
+    content: str
+    embed: discord.Embed
+    view: discord.ui.View | None = None
+
+
+@dataclass(frozen=True)
 class BotSettings:
     """Environment-backed defaults used before per-server config is persisted."""
 
@@ -160,8 +169,258 @@ def format_detection_summary(
     )
 
 
+def build_moderation_log_payload(
+    message: discord.Message,
+    result: DetectionResult,
+    action_taken: str,
+) -> ModerationLogPayload:
+    """Build a Discord embed that reads like a compact moderation snapshot."""
+
+    channel_label = _format_channel_reference(message.channel)
+    event_verb = _format_event_verb(result.decision.action, action_taken)
+    content = f"**AutoMod** has {event_verb} a message in {channel_label}"
+    jump_url = getattr(message, "jump_url", None)
+
+    embed = discord.Embed(
+        title=_format_snapshot_title(result.decision.action, action_taken),
+        description=_format_message_snapshot(message),
+        url=jump_url,
+        color=_embed_color_for_result(result, action_taken),
+        timestamp=getattr(message, "created_at", None) or discord.utils.utcnow(),
+    )
+
+    author_name = _format_author_name(message.author)
+    author_icon_url = _format_author_icon_url(message.author)
+    if author_icon_url:
+        embed.set_author(name=author_name, icon_url=author_icon_url)
+    else:
+        embed.set_author(name=author_name)
+
+    embed.add_field(
+        name="Probability Score",
+        value=_truncate_for_discord(_format_probability_score(result)),
+        inline=True,
+    )
+    embed.add_field(
+        name="Risk",
+        value=_truncate_for_discord(_format_risk_summary(result)),
+        inline=True,
+    )
+    embed.add_field(
+        name="Actions Taken",
+        value=_truncate_for_discord(_format_actions_taken(result, action_taken)),
+        inline=False,
+    )
+    embed.add_field(
+        name="Reasoning",
+        value=_truncate_for_discord(_format_reasoning(result)),
+        inline=False,
+    )
+    embed.add_field(
+        name="Detection Trace",
+        value=_truncate_for_discord(_format_detection_trace(result)),
+        inline=False,
+    )
+
+    message_id = getattr(message, "id", "unknown")
+    embed.set_footer(text=f"Message ID: {message_id}")
+
+    return ModerationLogPayload(
+        content=content,
+        embed=embed,
+        view=_build_moderation_log_view(message),
+    )
+
+
 def _format_optional_float(value: float | None) -> str:
     return f"{value:.3f}" if value is not None else "none"
+
+
+def _format_channel_reference(channel: object) -> str:
+    mention = getattr(channel, "mention", None)
+    if mention:
+        return str(mention)
+
+    channel_id = getattr(channel, "id", None)
+    if channel_id is not None:
+        return f"<#{channel_id}>"
+
+    return "unknown channel"
+
+
+def _format_event_verb(action: Decision, action_taken: str) -> str:
+    if action_taken == "deleted":
+        return "blocked"
+    if action == Decision.REVIEW:
+        return "flagged for review"
+    if action == Decision.LOG:
+        return "logged"
+    if action == Decision.DELETE:
+        return "flagged"
+    return action.value
+
+
+def _format_snapshot_title(action: Decision, action_taken: str) -> str:
+    if action_taken == "deleted":
+        return "Blocked Message Snapshot"
+    if action == Decision.REVIEW:
+        return "Review Message Snapshot"
+    if action == Decision.LOG:
+        return "Logged Message Snapshot"
+    return "Moderation Snapshot"
+
+
+def _format_message_snapshot(message: discord.Message) -> str:
+    author_name = _format_author_name(message.author)
+    preview = (message.content or "").strip() or "[empty message]"
+    preview = _truncate_for_discord(preview, limit=1600)
+    quoted_preview = "\n".join(f"> {line}" if line else ">" for line in preview.splitlines())
+    return f"**{author_name}**\n{quoted_preview}"
+
+
+def _format_author_name(author: object) -> str:
+    author_id = getattr(author, "id", "unknown")
+    display_name = (
+        getattr(author, "display_name", None)
+        or getattr(author, "global_name", None)
+        or getattr(author, "name", None)
+        or str(author_id)
+    )
+    return f"{display_name} ({author_id})"
+
+
+def _format_author_icon_url(author: object) -> str | None:
+    avatar = getattr(author, "display_avatar", None) or getattr(author, "avatar", None)
+    url = getattr(avatar, "url", None)
+    return str(url) if url else None
+
+
+def _embed_color_for_result(result: DetectionResult, action_taken: str) -> discord.Color:
+    if action_taken == "deleted":
+        return discord.Color.red()
+    if result.decision.action == Decision.DELETE:
+        return discord.Color.dark_red()
+    if result.decision.action == Decision.REVIEW:
+        return discord.Color.orange()
+    if result.decision.action == Decision.LOG:
+        return discord.Color.blurple()
+    return discord.Color.light_grey()
+
+
+def _format_probability_score(result: DetectionResult) -> str:
+    classifier = _format_classifier_probability(result)
+    embedding = _format_embedding_similarity(result)
+    return "\n".join(
+        [
+            f"Classifier: {classifier}",
+            f"Embedding: {embedding}",
+        ]
+    )
+
+
+def _format_classifier_probability(result: DetectionResult) -> str:
+    if result.classifier_probability is not None:
+        percentage = result.classifier_probability * 100
+        return f"{percentage:.1f}% ({result.classifier_probability:.3f})"
+    if result.classifier_called:
+        return "no score returned"
+    if result.classifier_skip_reason:
+        return f"not evaluated ({result.classifier_skip_reason})"
+    return "not evaluated"
+
+
+def _format_embedding_similarity(result: DetectionResult) -> str:
+    if result.embedding_similarity is not None:
+        label = f"{result.embedding_similarity:.3f}"
+        if result.embedding_matched_category:
+            return f"{label} ({result.embedding_matched_category})"
+        return label
+    if result.embedding_called:
+        return "no score returned"
+    if result.embedding_skip_reason:
+        return f"not evaluated ({result.embedding_skip_reason})"
+    return "not evaluated"
+
+
+def _format_risk_summary(result: DetectionResult) -> str:
+    final_score = result.rule_score.score if result.rule_score else 0
+    rule_level = result.rule_score.level.value if result.rule_score else "none"
+    return "\n".join(
+        [
+            f"Rule score: {final_score}",
+            f"Rule level: {rule_level}",
+            f"Band: {result.decision.band.value}",
+        ]
+    )
+
+
+def _format_actions_taken(result: DetectionResult, action_taken: str) -> str:
+    return "\n".join(
+        [
+            f"Decision: {_humanize_label(result.decision.action.value)}",
+            f"Outcome: {_humanize_action_taken(action_taken)}",
+            f"Reason: {result.decision.reason}",
+        ]
+    )
+
+
+def _humanize_action_taken(action_taken: str) -> str:
+    labels = {
+        "deleted": "Deleted message",
+        "delete_skipped": "Delete skipped by configuration",
+        "delete_failed": "Delete failed",
+        "review": "Sent to moderator review",
+        "log": "Logged only",
+        "allow": "Allowed",
+    }
+    return labels.get(action_taken, _humanize_label(action_taken))
+
+
+def _format_reasoning(result: DetectionResult) -> str:
+    rule_reasons = result.rule_score.reasons if result.rule_score else []
+    return "\n".join(
+        [
+            f"Decision reason: {result.decision.reason}",
+            f"Screening: {_format_reason_list(result.screening.reasons)}",
+            f"Rules: {_format_reason_list(rule_reasons)}",
+        ]
+    )
+
+
+def _format_detection_trace(result: DetectionResult) -> str:
+    classifier_status = "called" if result.classifier_called else "skipped"
+    embedding_status = "called" if result.embedding_called else "skipped"
+    return "\n".join(
+        [
+            f"Classifier: {classifier_status}; {result.classifier_skip_reason or 'score available'}",
+            f"Embedding: {embedding_status}; {result.embedding_skip_reason or 'score available'}",
+            f"Embedding match: {result.embedding_matched_category or 'none'}",
+        ]
+    )
+
+
+def _format_reason_list(reasons: list[str]) -> str:
+    return ", ".join(reasons) if reasons else "none"
+
+
+def _humanize_label(value: str) -> str:
+    return value.replace("_", " ").title()
+
+
+def _build_moderation_log_view(message: discord.Message) -> discord.ui.View | None:
+    jump_url = getattr(message, "jump_url", None)
+    if not jump_url:
+        return None
+
+    view = discord.ui.View(timeout=None)
+    view.add_item(discord.ui.Button(label="Jump to Message", url=jump_url))
+    return view
+
+
+def _truncate_for_discord(value: str, limit: int = 1024) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
 
 
 def build_message_context(message: discord.Message) -> MessageContext:
@@ -248,7 +507,7 @@ class ScamDetectionBot(discord.Client):
 
     async def _notify_moderators_if_needed(
         self,
-        summary: str,
+        payload: ModerationLogPayload,
         action: Decision,
         guild_config: GuildConfig,
     ) -> None:
@@ -271,7 +530,12 @@ class ScamDetectionBot(discord.Client):
             print("MOD_REVIEW_CHANNEL_ID does not point to a sendable channel.")
             return
 
-        await channel.send(summary)
+        await channel.send(
+            content=payload.content,
+            embed=payload.embed,
+            view=payload.view,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def _handle_detected_message(
         self,
@@ -286,11 +550,14 @@ class ScamDetectionBot(discord.Client):
             result=result,
         )
         print(summary)
-        await self._notify_moderators_if_needed(summary, result.decision.action, guild_config)
 
         action_taken = result.decision.action.value
         if result.decision.action == Decision.DELETE:
             action_taken = await self._delete_message_if_allowed(message, guild_config)
+
+        print(f"Action taken: {action_taken}")
+        payload = build_moderation_log_payload(message, result, action_taken)
+        await self._notify_moderators_if_needed(payload, result.decision.action, guild_config)
 
         self._store_pending_candidate(message, result, action_taken)
 

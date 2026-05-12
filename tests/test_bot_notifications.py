@@ -3,6 +3,7 @@ import pytest
 from src.scam_detector.bot import (
     BotSettings,
     ScamDetectionBot,
+    build_moderation_log_payload,
     build_default_guild_config,
     format_detection_summary,
     load_bot_settings_from_env,
@@ -102,6 +103,7 @@ def test_bot_registers_scam_config_command_group() -> None:
 
 class FakeAuthor:
     id = 10
+    display_name = "Hav"
 
 
 class FakeGuild:
@@ -110,6 +112,7 @@ class FakeGuild:
 
 class FakeChannel:
     id = 30
+    mention = "<#30>"
 
 
 class FakeMessage:
@@ -120,6 +123,7 @@ class FakeMessage:
         self.guild = FakeGuild()
         self.channel = FakeChannel()
         self.deleted = False
+        self.jump_url = "https://discord.com/channels/20/30/123"
 
     async def delete(self) -> None:
         self.deleted = True
@@ -127,10 +131,36 @@ class FakeMessage:
 
 class FakeModChannel:
     def __init__(self) -> None:
-        self.messages: list[str] = []
+        self.messages: list[dict[str, object]] = []
 
-    async def send(self, summary: str) -> None:
-        self.messages.append(summary)
+    async def send(self, *args: object, **kwargs: object) -> None:
+        self.messages.append({"args": args, "kwargs": kwargs})
+
+
+def test_build_moderation_log_payload_contains_snapshot_reasoning_probability_and_actions() -> None:
+    message = FakeMessage("Hello @everyone\nFree PS5 giveaway, DM me if interested.")
+    result = DetectionResult(
+        eligible=True,
+        screening=ScreeningResult(triggered=True, reasons=["mass_mention"]),
+        rule_score=RuleScore(
+            score=20,
+            level=RiskLevel.CRITICAL,
+            reasons=["mass_mention", "high_value_item", "dm_request"],
+        ),
+        classifier_probability=0.94,
+        classifier_called=True,
+        decision=DecisionResult(Decision.DELETE, "classifier_auto_delete_threshold", ActionBand.HIGH),
+    )
+
+    payload = build_moderation_log_payload(message, result, action_taken="deleted")
+    fields = {field.name: field.value for field in payload.embed.fields}
+
+    assert payload.content == "**AutoMod** has blocked a message in <#30>"
+    assert "Free PS5 giveaway" in payload.embed.description
+    assert "94.0% (0.940)" in fields["Probability Score"]
+    assert "mass_mention, high_value_item, dm_request" in fields["Reasoning"]
+    assert "Outcome: Deleted message" in fields["Actions Taken"]
+    assert payload.view is not None
 
 
 @pytest.mark.asyncio
@@ -161,6 +191,9 @@ async def test_critical_detection_deletes_logs_and_stores_pending_candidate(tmp_
 
     assert message.deleted
     assert mod_channel.messages
+    log_kwargs = mod_channel.messages[0]["kwargs"]
+    assert log_kwargs["content"] == "**AutoMod** has blocked a message in <#30>"
+    assert "Actions Taken" in {field.name for field in log_kwargs["embed"].fields}
     record = repository.list_records()[0]
     assert record.label is None
     assert record.label_source == "bot_flag"
