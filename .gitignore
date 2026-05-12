@@ -1,0 +1,15 @@
+.env
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/raw/
+data/processed/
+models/*.joblib
+models/*.pkl
+*.sqlite
+*.db
+.DS_Store
+.codex
