@@ -1,6 +1,7 @@
 # Discord Scam Detection Bot
 
-Python Discord moderation bot for tiered scam detection.
+Python 3 Discord moderation bot for tiered scam detection, moderator review,
+and feedback-driven classifier training.
 
 The project is built around a cheap-first detection pipeline:
 
@@ -12,21 +13,51 @@ The project is built around a cheap-first detection pipeline:
 6. Decide whether to allow, log, send to review, or delete.
 7. Store moderator-confirmed labels for future training.
 
+## Tech stack
+
+- Python 3.10+ with modern type hints and dataclasses.
+- `discord.py` for Discord gateway events and slash commands.
+- `python-dotenv` for local `.env` configuration.
+- `scikit-learn` for TF-IDF features, template similarity, and Logistic Regression.
+- `pandas`, `numpy`, and `joblib` for training data, metrics, and model artifacts.
+- Hugging Face `datasets` and `huggingface-hub` for bootstrap dataset loading.
+- SQLite through Python's standard `sqlite3` module for feedback storage.
+- `pytest` and `pytest-asyncio` for unit and async bot tests.
+
 ## Local setup
 
+Run commands from the repository root. Use `python3` to create the virtualenv;
+after activation, the virtualenv exposes `python`.
+
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
 Run tests:
 
 ```bash
-pytest
+python -m pytest
 ```
 
-## Architecture
+Without activating the virtualenv, use:
+
+```bash
+.venv/bin/python -m pytest
+```
+
+## Project layout
+
+- `src/scam_detector/`: bot runtime, rules, scoring, decisions, config, and feedback.
+- `src/detection/`: optional template similarity layer.
+- `src/training/`: Hugging Face dataset loading, model training, and evaluation.
+- `tests/`: unit and integration-style tests for runtime and training behavior.
+- `data/`: local raw/processed data, ignored by git.
+- `models/`: local trained model artifacts, ignored by git.
+
+## Runtime architecture
 
 The runtime path intentionally avoids expensive ML on ordinary chat traffic:
 
@@ -34,7 +65,7 @@ The runtime path intentionally avoids expensive ML on ordinary chat traffic:
 - Tier 1 screening: cheap keyword, link, and mention checks run on eligible messages.
 - Tier 2 scoring: suspicious messages receive deterministic risk scoring from content and metadata.
 - Tier 3 embedding similarity: optional known-template similarity runs only for cheap-screened medium/uncertain messages.
-- Tier 4 classifier: the optional sklearn model is called only for uncertain messages that still need help after rules and embeddings.
+- Tier 4 classifier: the optional scikit-learn model is called only for uncertain messages that still need help after rules and embeddings.
 - Decision engine: low risk is allowed, medium confidence goes to review, and critical/high-confidence detections can take immediate action.
 - Feedback loop: moderator-confirmed scam and false-positive labels are stored for future training.
 
@@ -67,7 +98,7 @@ Moderator outcomes determine training eligibility:
 
 User reports are weak signals. They increase review priority, but they do not directly delete messages and do not become training labels.
 
-## Dataset
+## Dataset preparation
 
 The bootstrap dataset is Hugging Face only:
 
@@ -121,7 +152,7 @@ Default experiments include:
 - 5:1 negative downsampling without class weight
 - 3:1 negative downsampling with `class_weight="balanced"`
 
-The model is a sklearn pipeline using TF-IDF word n-grams, TF-IDF character n-grams, optional metadata features, and Logistic Regression.
+The model is a scikit-learn pipeline using TF-IDF word n-grams, TF-IDF character n-grams, optional metadata features, and Logistic Regression.
 
 Saved training outputs:
 
@@ -173,7 +204,7 @@ The Hugging Face dataset is only a bootstrap seed. The long-term training set sh
 
 Never train on the model's own predictions as ground truth. Only train on imported labeled data or human-confirmed labels.
 
-## Bot skeleton
+## Bot configuration
 
 Create a local `.env` file:
 

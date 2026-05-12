@@ -14,7 +14,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-DEFAULT_THRESHOLDS = [0.50, 0.60, 0.70, 0.80, 0.90, 0.95]
+DEFAULT_THRESHOLDS = (0.50, 0.60, 0.70, 0.80, 0.90, 0.95)
 
 
 def evaluate_predictions(

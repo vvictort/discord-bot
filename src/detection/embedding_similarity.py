@@ -88,7 +88,7 @@ def load_scam_templates(path: str | Path | None) -> list[ScamTemplate]:
     if path is None:
         return list(DEFAULT_SCAM_TEMPLATES)
 
-    payload = json.loads(Path(path).read_text())
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(payload, dict):
         templates = []
         for category, texts in payload.items():

@@ -39,11 +39,17 @@ class BotSettings:
 def _parse_bool(value: str | None, default: bool) -> bool:
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    normalized = value.strip().lower()
+    if not normalized:
+        return default
+    return normalized in {"1", "true", "yes", "y", "on"}
 
 
 def _parse_optional_int(value: str | None) -> int | None:
-    return int(value) if value else None
+    if value is None:
+        return None
+    normalized = value.strip()
+    return int(normalized) if normalized else None
 
 
 def _parse_role_ids(value: str | None) -> frozenset[int]:
@@ -62,7 +68,7 @@ def _parse_role_ids(value: str | None) -> frozenset[int]:
 
 
 def load_bot_settings_from_env(env: Mapping[str, str] | None = None) -> BotSettings:
-    values = env or os.environ
+    values = env if env is not None else os.environ
     return BotSettings(
         mod_review_channel_id=_parse_optional_int(values.get("MOD_REVIEW_CHANNEL_ID")),
         delete_enabled=_parse_bool(values.get("BOT_DELETE_ENABLED"), default=True),

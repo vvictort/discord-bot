@@ -30,14 +30,14 @@ MODEL_OUTPUT = Path("models/scam_classifier.joblib")
 THRESHOLD_OUTPUT = Path("models/thresholds.json")
 METRICS_OUTPUT = Path("models/metrics.json")
 
-METADATA_FEATURES = [
+METADATA_FEATURES = (
     "message_length",
     "word_count",
     "has_link",
     "has_mention",
     "num_roles",
     "time_since_join",
-]
+)
 
 ClassWeight = Literal["balanced"] | None
 
@@ -263,7 +263,10 @@ def train_from_huggingface(
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
 
     joblib.dump(best_model, model_path)
-    threshold_path.write_text(json.dumps(best_metrics["recommended_thresholds"], indent=2) + "\n")
+    threshold_path.write_text(
+        json.dumps(best_metrics["recommended_thresholds"], indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     payload = {
         "dataset_name": dataset_name,
@@ -277,7 +280,7 @@ def train_from_huggingface(
         ],
         "experiments": experiment_results,
     }
-    metrics_path.write_text(json.dumps(payload, indent=2) + "\n")
+    metrics_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return payload
 
 

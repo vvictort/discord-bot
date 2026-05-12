@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -81,7 +81,7 @@ class FeedbackRepository:
         if not text.strip():
             raise ValueError("text is required for pending candidates")
 
-        now = datetime.now(UTC).isoformat()
+        now = _utc_now_iso()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -122,6 +122,7 @@ class FeedbackRepository:
         if not text.strip():
             raise ValueError("text is required for confirmed labels")
 
+        now = _utc_now_iso()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -143,8 +144,8 @@ class FeedbackRepository:
                     "moderator_confirmed",
                     "confirmed",
                     0,
-                    datetime.now(UTC).isoformat(),
-                    datetime.now(UTC).isoformat(),
+                    now,
+                    now,
                 ),
             )
 
@@ -158,6 +159,7 @@ class FeedbackRepository:
         if label not in (0, 1):
             raise ValueError("label must be 0 for not scam or 1 for scam/phishing")
 
+        now = _utc_now_iso()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -171,7 +173,7 @@ class FeedbackRepository:
                     updated_at = ?
                 WHERE message_id = ?
                 """,
-                (label, moderator_id, reason, datetime.now(UTC).isoformat(), message_id),
+                (label, moderator_id, reason, now, message_id),
             )
 
     def ignore_candidate(
@@ -180,6 +182,7 @@ class FeedbackRepository:
         moderator_id: int,
         reason: str | None = None,
     ) -> None:
+        now = _utc_now_iso()
         with self._connect() as connection:
             connection.execute(
                 """
@@ -191,7 +194,7 @@ class FeedbackRepository:
                     updated_at = ?
                 WHERE message_id = ?
                 """,
-                (moderator_id, reason, datetime.now(UTC).isoformat(), message_id),
+                (moderator_id, reason, now, message_id),
             )
 
     def add_user_report(
@@ -206,7 +209,7 @@ class FeedbackRepository:
         if not text.strip():
             raise ValueError("text is required for user reports")
 
-        now = datetime.now(UTC).isoformat()
+        now = _utc_now_iso()
         with self._connect() as connection:
             existing = connection.execute(
                 """
@@ -343,3 +346,7 @@ class FeedbackRepository:
             """
         )
         connection.execute("DROP TABLE moderator_feedback_legacy")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()

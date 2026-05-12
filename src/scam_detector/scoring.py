@@ -5,7 +5,7 @@ from enum import Enum
 
 from src.scam_detector.models import MessageContext
 from src.scam_detector.preprocessing import normalize_message_text
-from src.scam_detector.screening import SUSPICIOUS_KEYWORDS
+from src.scam_detector.screening import SUSPICIOUS_KEYWORDS, detect_message_signals
 
 
 class RiskLevel(str, Enum):
@@ -36,8 +36,6 @@ def score_message(message: MessageContext) -> RuleScore:
         if keyword in normalized:
             score += 2
             reasons.append(f"keyword:{keyword}")
-
-    from src.scam_detector.screening import detect_message_signals
 
     signal_reasons = detect_message_signals(message)
     signal_set = set(signal_reasons)

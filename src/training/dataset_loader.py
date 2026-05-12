@@ -20,7 +20,7 @@ COLUMN_RENAMES = {
     "msg_content": "text",
 }
 
-METADATA_COLUMNS = [
+METADATA_COLUMNS = (
     "msg_timestamp",
     "usr_joined_at",
     "time_since_join",
@@ -29,9 +29,9 @@ METADATA_COLUMNS = [
     "has_link",
     "has_mention",
     "num_roles",
-]
+)
 
-REQUIRED_COLUMNS = ["text", "label"]
+REQUIRED_COLUMNS = ("text", "label")
 WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -105,8 +105,9 @@ def _load_huggingface_csv_fallback(dataset_name: str, original_error: Exception)
         return pd.concat(frames, ignore_index=True)
     except Exception as fallback_error:
         raise RuntimeError(
-            f"Could not load Hugging Face dataset {dataset_name} directly or via CSV fallback"
-        ) from fallback_error or original_error
+            f"Could not load Hugging Face dataset {dataset_name} directly or via CSV fallback. "
+            f"Original error: {original_error}"
+        ) from fallback_error
 
 
 def standardize_columns(frame: pd.DataFrame) -> pd.DataFrame:
@@ -254,7 +255,10 @@ def save_processed_dataset(
     splits.train.to_csv(output_path / "train.csv", index=False)
     splits.validation.to_csv(output_path / "validation.csv", index=False)
     splits.test.to_csv(output_path / "test.csv", index=False)
-    (output_path / "dataset_stats.json").write_text(json.dumps(asdict(stats), indent=2) + "\n")
+    (output_path / "dataset_stats.json").write_text(
+        json.dumps(asdict(stats), indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def prepare_and_save_dataset(
