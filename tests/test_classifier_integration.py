@@ -37,6 +37,26 @@ def test_detection_pipeline_skips_classifier_for_untriggered_message() -> None:
     assert classifier.calls == 0
 
 
+def test_detection_pipeline_bypasses_whitelisted_roles() -> None:
+    classifier = CountingClassifier()
+    pipeline = DetectionPipeline(classifier=classifier, whitelisted_role_ids={42})
+
+    result = pipeline.detect(
+        MessageContext(
+            text="@everyone free nitro claim https://example.test",
+            author_id=1,
+            guild_id=1,
+            author_role_ids=(42,),
+            has_link=True,
+            has_mention=True,
+        )
+    )
+
+    assert result.decision.action == Decision.ALLOW
+    assert result.classifier_probability is None
+    assert classifier.calls == 0
+
+
 def test_detection_pipeline_calls_classifier_for_medium_or_high_rule_score() -> None:
     classifier = CountingClassifier(probability=0.80)
     pipeline = DetectionPipeline(classifier=classifier)
