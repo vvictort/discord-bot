@@ -18,6 +18,7 @@ def test_load_bot_settings_from_env_parses_optional_review_channel() -> None:
             "BOT_DELETE_ENABLED": "false",
             "BOT_NOTIFY_LOG_ACTIONS": "true",
             "WHITELISTED_ROLE_IDS": "111, 222",
+            "COMMAND_SYNC_GUILD_ID": "333",
         }
     )
 
@@ -26,6 +27,7 @@ def test_load_bot_settings_from_env_parses_optional_review_channel() -> None:
         delete_enabled=False,
         notify_log_actions=True,
         whitelisted_role_ids=frozenset({111, 222}),
+        command_sync_guild_id=333,
     )
 
 

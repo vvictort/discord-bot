@@ -150,6 +150,7 @@ Create a local `.env` file:
 DISCORD_TOKEN=your-token-here
 MOD_REVIEW_CHANNEL_ID=your-mod-review-channel-id
 WHITELISTED_ROLE_IDS=admin-role-id,moderator-role-id
+COMMAND_SYNC_GUILD_ID=your-private-server-id
 ```
 
 Run the bot:
@@ -161,9 +162,10 @@ python -m src.scam_detector.bot
 Optional bot settings:
 
 - `MOD_REVIEW_CHANNEL_ID`: channel where log/review/delete events are posted.
-- `WHITELISTED_ROLE_IDS`: comma-separated role IDs that bypass scam detection.
+- `WHITELISTED_ROLE_IDS`: comma-separated default role IDs that bypass scam detection.
 - `BOT_DELETE_ENABLED=false`: dry-run mode; detections are reported but messages are not deleted.
 - `BOT_NOTIFY_LOG_ACTIONS=false`: only review/delete events go to the mod channel.
+- `COMMAND_SYNC_GUILD_ID`: sync slash commands to one server immediately during testing.
 
 For a private server, also check Discord configuration:
 
@@ -176,3 +178,19 @@ For a private server, also check Discord configuration:
 Most test scam messages will not auto-delete immediately. Medium confidence becomes `log`, high rule-only confidence becomes `review`, and auto-delete requires a classifier probability above the auto-delete threshold.
 
 To copy a role ID, enable Discord Developer Mode, open **Server Settings > Roles**, right-click the role, and choose **Copy Role ID**. Avoid whitelisting `@everyone`, because that bypasses detection for the whole server.
+
+## Server configuration commands
+
+Admins with **Manage Server** can configure the bot in Discord:
+
+```text
+/scam-config review-channel #mod-alerts
+/scam-config delete-enabled false
+/scam-config whitelist-role add @Admin
+/scam-config whitelist-role remove @Admin
+/scam-config whitelist-role list
+```
+
+These command settings are currently stored in memory and reset when the bot restarts. The `.env` values still act as startup defaults. Persistent per-server storage is the next step.
+
+For local testing, set `COMMAND_SYNC_GUILD_ID` to your server ID. Without it, commands are synced globally and may take longer to appear in Discord.
