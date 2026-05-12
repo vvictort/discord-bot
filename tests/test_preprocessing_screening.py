@@ -18,6 +18,13 @@ def test_normalize_message_text_handles_discord_scam_text_variants() -> None:
     )
 
 
+def test_normalize_message_text_ignores_emojis() -> None:
+    assert (
+        normalize_message_text("🎉 Hello 👋 @everyone 🎁 Mac Book Air 💻 first-come, first-served 🚨")
+        == "hello @everyone macbook air first come first served"
+    )
+
+
 def test_ineligible_messages_are_ignored() -> None:
     assert not is_eligible_message(MessageContext(text="", author_id=1))
     assert not is_eligible_message(MessageContext(text="hello", author_id=1, author_is_bot=True))

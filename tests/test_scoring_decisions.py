@@ -114,6 +114,24 @@ def test_known_giveaway_scam_messages_score_high_or_critical_without_ml() -> Non
     }.issubset(all_reasons)
 
 
+def test_known_giveaway_scam_message_with_emojis_still_scores_high() -> None:
+    score = score_message(
+        MessageContext(
+            text=(
+                "🎉 Hello @everyone 🎁 I’m giving away my MacBook Air 2022 M2 for FREE 💻. "
+                "First-come, first-served 🚨. DM me if interested!"
+            ),
+            author_id=1,
+        )
+    )
+
+    assert score.level in {RiskLevel.HIGH, RiskLevel.CRITICAL}
+    assert "mass_mention" in score.reasons
+    assert "high_value_item" in score.reasons
+    assert "giveaway_language" in score.reasons
+    assert "dm_request" in score.reasons
+
+
 def test_normal_messages_do_not_score_as_critical_or_auto_delete() -> None:
     for text in NORMAL_MESSAGES:
         score = score_message(MessageContext(text=text, author_id=1))
