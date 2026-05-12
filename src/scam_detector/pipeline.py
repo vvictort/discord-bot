@@ -23,6 +23,7 @@ class DetectionResult:
     classifier_probability: float | None
     classifier_called: bool
     decision: DecisionResult
+    classifier_skip_reason: str | None = None
 
 
 class DetectionPipeline:
@@ -47,6 +48,7 @@ class DetectionPipeline:
                 classifier_probability=None,
                 classifier_called=False,
                 decision=decide_action(rule_score=0, classifier_probability=None),
+                classifier_skip_reason="ineligible_message",
             )
 
         active_whitelist = (
@@ -62,6 +64,7 @@ class DetectionPipeline:
                 classifier_probability=None,
                 classifier_called=False,
                 decision=decide_action(rule_score=0, classifier_probability=None),
+                classifier_skip_reason="whitelisted_role",
             )
 
         screening = cheap_trigger_screen(message)
@@ -73,14 +76,20 @@ class DetectionPipeline:
                 classifier_probability=None,
                 classifier_called=False,
                 decision=decide_action(rule_score=0, classifier_probability=None),
+                classifier_skip_reason="screening_not_triggered",
             )
 
         rule_score = score_message(message)
         classifier_probability = None
         classifier_called = False
-        if self.classifier is not None and rule_score.level in {RiskLevel.MEDIUM, RiskLevel.HIGH}:
+        classifier_skip_reason = None
+        if rule_score.level in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
+            classifier_skip_reason = f"{rule_score.level.value}_rule_score"
+        elif self.classifier is not None and rule_score.level == RiskLevel.MEDIUM:
             classifier_called = True
             classifier_probability = self.classifier.predict_probability(message)
+        elif self.classifier is None:
+            classifier_skip_reason = "classifier_unavailable"
 
         return DetectionResult(
             eligible=True,
@@ -89,6 +98,7 @@ class DetectionPipeline:
             classifier_probability=classifier_probability,
             classifier_called=classifier_called,
             decision=decide_action(rule_score=rule_score.score, classifier_probability=classifier_probability),
+            classifier_skip_reason=classifier_skip_reason,
         )
 
     def _has_whitelisted_role(

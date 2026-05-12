@@ -93,9 +93,11 @@ def format_detection_summary(
             f"Author: {author_id}",
             f"Channel: {channel_id}",
             f"Rule score: {rule_score}",
+            f"Final score: {rule_score}",
             f"Rule level: {rule_level}",
             f"Screening reasons: {', '.join(result.screening.reasons) or 'none'}",
             f"Classifier called: {result.classifier_called}",
+            f"Classifier skip reason: {result.classifier_skip_reason or 'none'}",
             f"Classifier probability: {probability}",
             f"Message: `{preview}`",
         ]

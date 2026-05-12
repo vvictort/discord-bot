@@ -12,6 +12,12 @@ class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    CRITICAL = "critical"
+
+
+MEDIUM_RULE_SCORE = 3
+HIGH_RULE_SCORE = 8
+CRITICAL_RULE_SCORE = 16
 
 
 @dataclass(frozen=True)
@@ -31,27 +37,99 @@ def score_message(message: MessageContext) -> RuleScore:
             score += 2
             reasons.append(f"keyword:{keyword}")
 
-    if message.has_link or "http://" in normalized or "https://" in normalized:
-        score += 2
-        reasons.append("has_link")
+    from src.scam_detector.screening import detect_message_signals
 
-    if message.has_mention or "@everyone" in normalized or "@here" in normalized:
-        score += 1
-        reasons.append("has_mention")
+    signal_reasons = detect_message_signals(message)
+    signal_set = set(signal_reasons)
+    reasons.extend(signal for signal in signal_reasons if signal not in reasons)
 
-    if message.member_join_age_seconds is not None and message.member_join_age_seconds < 3600:
+    score += _score_signals(signal_set)
+
+    keyword_suspicious_content = any(reason.startswith("keyword:") for reason in reasons)
+    suspicious_content_exists = keyword_suspicious_content or bool(
+        signal_set.intersection(
+            {
+                "giveaway_language",
+                "free_offer",
+                "dm_request",
+                "high_value_giveaway_dm_pattern",
+                "mass_mention_giveaway_pattern",
+                "free_high_value_item_pattern",
+            }
+        )
+    )
+
+    if (
+        suspicious_content_exists
+        and message.member_join_age_seconds is not None
+        and message.member_join_age_seconds < 3600
+    ):
         score += 2
         reasons.append("new_member")
 
-    if message.num_roles == 0:
+    if suspicious_content_exists and message.num_roles == 0:
         score += 1
         reasons.append("no_roles")
 
-    if score >= 7:
+    if score >= CRITICAL_RULE_SCORE:
+        level = RiskLevel.CRITICAL
+    elif score >= HIGH_RULE_SCORE:
         level = RiskLevel.HIGH
-    elif score >= 3:
+    elif score >= MEDIUM_RULE_SCORE:
         level = RiskLevel.MEDIUM
     else:
         level = RiskLevel.LOW
 
     return RuleScore(score=score, level=level, reasons=reasons)
+
+
+def _score_signals(signals: set[str]) -> int:
+    score = 0
+
+    if "has_link" in signals:
+        score += 1
+    if "has_mention" in signals:
+        score += 1
+    if "mass_mention" in signals:
+        score += 3
+
+    # These are weak alone, but become strong through composite patterns below.
+    if "high_value_item" in signals:
+        score += 1
+    if "giveaway_language" in signals:
+        score += 1
+    if "free_offer" in signals:
+        score += 1
+    if "dm_request" in signals:
+        score += 1
+    if "urgency_phrase" in signals:
+        score += 1
+    if "friend_request_or_external_contact" in signals:
+        score += 1
+    if "whatsapp_or_phone_contact" in signals:
+        score += 2
+
+    has_high_value_giveaway = "high_value_item" in signals and (
+        "giveaway_language" in signals or "free_offer" in signals
+    )
+
+    if "high_value_item" in signals and "giveaway_language" in signals:
+        score += 5
+    if "high_value_giveaway_dm_pattern" in signals:
+        score += 4
+    if "mass_mention_giveaway_pattern" in signals:
+        score += 3
+    if "free_high_value_item_pattern" in signals:
+        score += 3
+    if has_high_value_giveaway and "urgency_phrase" in signals:
+        score += 2
+    if has_high_value_giveaway and "whatsapp_or_phone_contact" in signals:
+        score += 3
+    if has_high_value_giveaway and "emotional_need_framing" in signals:
+        score += 2
+    if has_high_value_giveaway and "recently_upgraded_framing" in signals:
+        score += 2
+    if has_high_value_giveaway and "condition_framing" in signals:
+        score += 1
+
+    return score
