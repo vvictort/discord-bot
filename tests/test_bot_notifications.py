@@ -54,7 +54,7 @@ def test_format_detection_summary_includes_action_reason_and_score() -> None:
 
     assert "Action: review" in summary
     assert "Reason: classifier_mod_review_threshold" in summary
-    assert "Rule score: 4" in summary
+    assert "Final score: 4" in summary
     assert "Classifier probability: 0.820" in summary
 
 

@@ -10,18 +10,25 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from src.scam_detector.preprocessing import normalize_message_text
 
+# This layer is intentionally lightweight: it uses local TF-IDF vectors as the
+# default "embedding" backend so the bot can run without downloading model files.
+# A future encoder can be injected through EmbeddingSimilarityMatcher.
 SIMILARITY_THRESHOLD = 0.18
 HIGH_SIMILARITY_THRESHOLD = 0.24
 
 
 @dataclass(frozen=True)
 class ScamTemplate:
+    """An anonymized known scam pattern grouped by moderation category."""
+
     category: str
     text: str
 
 
 @dataclass(frozen=True)
 class EmbeddingSimilarityResult:
+    """Similarity result that callers can safely ignore when unavailable."""
+
     max_similarity: float
     matched_template: str | None
     matched_category: str | None
@@ -71,6 +78,13 @@ DEFAULT_SCAM_TEMPLATES = [
 
 
 def load_scam_templates(path: str | Path | None) -> list[ScamTemplate]:
+    """Load anonymized templates.
+
+    Supported JSON shapes:
+    - [{"category": "macbook_giveaway", "text": "..."}]
+    - {"macbook_giveaway": ["...", "..."]}
+    """
+
     if path is None:
         return list(DEFAULT_SCAM_TEMPLATES)
 
@@ -96,6 +110,13 @@ def compute_embedding_similarity(
     message_text: str | None,
     templates: Sequence[ScamTemplate],
 ) -> EmbeddingSimilarityResult:
+    """Return the best semantic-template match for one message.
+
+    The current implementation uses character n-gram TF-IDF similarity. It is
+    robust to small wording changes and spelling/spacing variants, but it is
+    still cheap enough to run only on already suspicious messages.
+    """
+
     if not templates:
         return EmbeddingSimilarityResult(
             max_similarity=0.0,
@@ -142,6 +163,8 @@ def _similarity_reasons(max_similarity: float) -> list[str]:
 
 
 class EmbeddingSimilarityMatcher:
+    """Optional, fail-closed wrapper around the template similarity backend."""
+
     def __init__(
         self,
         template_path: str | Path | None = None,
@@ -158,6 +181,8 @@ class EmbeddingSimilarityMatcher:
             return
 
         try:
+            # The injected factory gives us a future hook for heavier embedding
+            # backends while keeping the runtime safe when dependencies are absent.
             if encoder_factory is not None:
                 encoder_factory()
             self.templates = load_scam_templates(template_path)

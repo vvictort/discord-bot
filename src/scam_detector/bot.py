@@ -18,6 +18,8 @@ from src.scam_detector.pipeline import DetectionPipeline, DetectionResult
 
 @dataclass(frozen=True)
 class BotSettings:
+    """Environment-backed defaults used before per-server config is persisted."""
+
     mod_review_channel_id: int | None = None
     delete_enabled: bool = True
     notify_log_actions: bool = True
@@ -33,7 +35,13 @@ def _parse_bool(value: str | None, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _parse_optional_int(value: str | None) -> int | None:
+    return int(value) if value else None
+
+
 def _parse_role_ids(value: str | None) -> frozenset[int]:
+    """Parse comma-separated Discord role IDs from .env defaults."""
+
     if not value:
         return frozenset()
 
@@ -48,17 +56,12 @@ def _parse_role_ids(value: str | None) -> frozenset[int]:
 
 def load_bot_settings_from_env(env: Mapping[str, str] | None = None) -> BotSettings:
     values = env or os.environ
-    review_channel = values.get("MOD_REVIEW_CHANNEL_ID")
     return BotSettings(
-        mod_review_channel_id=int(review_channel) if review_channel else None,
+        mod_review_channel_id=_parse_optional_int(values.get("MOD_REVIEW_CHANNEL_ID")),
         delete_enabled=_parse_bool(values.get("BOT_DELETE_ENABLED"), default=True),
         notify_log_actions=_parse_bool(values.get("BOT_NOTIFY_LOG_ACTIONS"), default=True),
         whitelisted_role_ids=_parse_role_ids(values.get("WHITELISTED_ROLE_IDS")),
-        command_sync_guild_id=(
-            int(values["COMMAND_SYNC_GUILD_ID"])
-            if values.get("COMMAND_SYNC_GUILD_ID")
-            else None
-        ),
+        command_sync_guild_id=_parse_optional_int(values.get("COMMAND_SYNC_GUILD_ID")),
         embedding_similarity_enabled=_parse_bool(
             values.get("EMBEDDING_SIMILARITY_ENABLED"),
             default=False,
@@ -82,7 +85,7 @@ def format_detection_summary(
     content: str,
     result: DetectionResult,
 ) -> str:
-    rule_score = result.rule_score.score if result.rule_score else 0
+    final_score = result.rule_score.score if result.rule_score else 0
     rule_level = result.rule_score.level.value if result.rule_score else "none"
     probability = (
         f"{result.classifier_probability:.3f}"
@@ -100,8 +103,7 @@ def format_detection_summary(
             f"Reason: {result.decision.reason}",
             f"Author: {author_id}",
             f"Channel: {channel_id}",
-            f"Rule score: {rule_score}",
-            f"Final score: {rule_score}",
+            f"Final score: {final_score}",
             f"Rule level: {rule_level}",
             f"Screening reasons: {', '.join(result.screening.reasons) or 'none'}",
             f"Embedding called: {result.embedding_called}",
@@ -121,6 +123,8 @@ def _format_optional_float(value: float | None) -> str:
 
 
 def build_message_context(message: discord.Message) -> MessageContext:
+    """Convert discord.py's message object into the small model our detector uses."""
+
     member = message.author if isinstance(message.author, discord.Member) else None
     now = discord.utils.utcnow()
     joined_at = member.joined_at if member else None
@@ -143,6 +147,8 @@ def build_message_context(message: discord.Message) -> MessageContext:
 
 
 class ScamDetectionBot(discord.Client):
+    """Discord client that routes messages through the scam detection pipeline."""
+
     def __init__(
         self,
         pipeline: DetectionPipeline | None = None,
@@ -158,19 +164,13 @@ class ScamDetectionBot(discord.Client):
         self.config_store = config_store or InMemoryGuildConfigStore(
             default_config=build_default_guild_config(self.settings)
         )
-        self.pipeline = pipeline or DetectionPipeline(
-            classifier=ScamClassifier(),
-            embedding_similarity=(
-                EmbeddingSimilarityMatcher(template_path=self.settings.scam_template_path)
-                if self.settings.embedding_similarity_enabled
-                else None
-            ),
-            whitelisted_role_ids=self.settings.whitelisted_role_ids,
-        )
+        self.pipeline = pipeline or self._build_default_pipeline()
         self.tree = app_commands.CommandTree(self)
         self._register_config_commands()
 
     async def setup_hook(self) -> None:
+        # Guild-scoped sync makes slash commands appear immediately in a test server.
+        # Global sync is still the publish-time default.
         if self.settings.command_sync_guild_id is not None:
             guild = discord.Object(id=self.settings.command_sync_guild_id)
             self.tree.copy_global_to(guild=guild)
@@ -246,7 +246,21 @@ class ScamDetectionBot(discord.Client):
 
         await channel.send(summary)
 
+    def _build_default_pipeline(self) -> DetectionPipeline:
+        embedding_similarity = (
+            EmbeddingSimilarityMatcher(template_path=self.settings.scam_template_path)
+            if self.settings.embedding_similarity_enabled
+            else None
+        )
+        return DetectionPipeline(
+            classifier=ScamClassifier(),
+            embedding_similarity=embedding_similarity,
+            whitelisted_role_ids=self.settings.whitelisted_role_ids,
+        )
+
     def _register_config_commands(self) -> None:
+        # These commands intentionally use the in-memory store for now. The command
+        # handlers should not care whether persistence is memory, SQLite, or remote.
         config_group = app_commands.Group(
             name="scam-config",
             description="Configure scam detection for this server.",

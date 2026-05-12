@@ -17,12 +17,16 @@ class ClassifierProtocol(Protocol):
 
 
 class EmbeddingSimilarityProtocol(Protocol):
+    """Interface for optional semantic-template matching."""
+
     def compare(self, message_text: str | None) -> EmbeddingSimilarityResult:
         ...
 
 
 @dataclass(frozen=True)
 class DetectionResult:
+    """Full detector trace used for moderation logs and tests."""
+
     eligible: bool
     screening: ScreeningResult
     rule_score: RuleScore | None
@@ -37,6 +41,12 @@ class DetectionResult:
 
 
 class DetectionPipeline:
+    """Cheap-first detection orchestrator.
+
+    The ordering matters: rules run before optional expensive layers, and
+    high/critical rule scores skip embeddings/classifier entirely.
+    """
+
     def __init__(
         self,
         classifier: ClassifierProtocol | None = None,
@@ -95,6 +105,10 @@ class DetectionPipeline:
             )
 
         rule_score = score_message(message)
+
+        # Embeddings are only a helper for uncertain suspicious messages. Obvious
+        # rule matches skip this layer so a low or unavailable semantic score
+        # cannot weaken deterministic rule evidence.
         embedding_called = False
         embedding_similarity_score = None
         embedding_matched_category = None
@@ -117,6 +131,8 @@ class DetectionPipeline:
         classifier_probability = None
         classifier_called = False
         classifier_skip_reason = None
+        # Classifier is last: it can help medium cases, but it must not override
+        # high-confidence rule/template evidence.
         if rule_score.level in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
             classifier_skip_reason = f"{rule_score.level.value}_rule_score"
         elif self.classifier is not None and rule_score.level == RiskLevel.MEDIUM:
