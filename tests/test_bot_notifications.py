@@ -1,4 +1,10 @@
-from src.scam_detector.bot import BotSettings, format_detection_summary, load_bot_settings_from_env
+from src.scam_detector.bot import (
+    BotSettings,
+    ScamDetectionBot,
+    build_default_guild_config,
+    format_detection_summary,
+    load_bot_settings_from_env,
+)
 from src.scam_detector.decisions import Decision, DecisionResult
 from src.scam_detector.models import ScreeningResult
 from src.scam_detector.pipeline import DetectionResult
@@ -44,3 +50,29 @@ def test_format_detection_summary_includes_action_reason_and_score() -> None:
     assert "Reason: classifier_mod_review_threshold" in summary
     assert "Rule score: 4" in summary
     assert "Classifier probability: 0.820" in summary
+
+
+def test_build_default_guild_config_from_env_settings() -> None:
+    config = build_default_guild_config(
+        BotSettings(
+            mod_review_channel_id=1,
+            delete_enabled=False,
+            notify_log_actions=False,
+            whitelisted_role_ids=frozenset({2}),
+        )
+    )
+
+    assert config.mod_review_channel_id == 1
+    assert not config.delete_enabled
+    assert not config.notify_log_actions
+    assert config.whitelisted_role_ids == frozenset({2})
+
+
+def test_bot_registers_scam_config_command_group() -> None:
+    bot = ScamDetectionBot(settings=BotSettings())
+
+    commands = {command.name: command for command in bot.tree.get_commands()}
+
+    assert "scam-config" in commands
+    subcommands = {command.name for command in commands["scam-config"].commands}
+    assert {"review-channel", "delete-enabled", "whitelist-role"}.issubset(subcommands)
