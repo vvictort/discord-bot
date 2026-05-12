@@ -1,3 +1,5 @@
+import pytest
+
 from src.scam_detector.bot import (
     BotSettings,
     ScamDetectionBot,
@@ -5,7 +7,9 @@ from src.scam_detector.bot import (
     format_detection_summary,
     load_bot_settings_from_env,
 )
-from src.scam_detector.decisions import Decision, DecisionResult
+from src.scam_detector.decisions import ActionBand, Decision, DecisionResult
+from src.scam_detector.feedback import FeedbackRepository
+from src.scam_detector.guild_config import GuildConfig
 from src.scam_detector.models import ScreeningResult
 from src.scam_detector.pipeline import DetectionResult
 from src.scam_detector.scoring import RiskLevel, RuleScore
@@ -21,6 +25,12 @@ def test_load_bot_settings_from_env_parses_optional_review_channel() -> None:
             "COMMAND_SYNC_GUILD_ID": "333",
             "EMBEDDING_SIMILARITY_ENABLED": "true",
             "SCAM_TEMPLATE_PATH": "templates/scams.json",
+            "AUTO_DELETE_CRITICAL": "true",
+            "AUTO_DELETE_HIGH": "true",
+            "CRITICAL_RULE_SCORE_THRESHOLD": "18",
+            "HIGH_RULE_SCORE_THRESHOLD": "9",
+            "MOD_REVIEW_THRESHOLD": "0.8",
+            "FEEDBACK_DB_PATH": "data/test-feedback.sqlite",
         }
     )
 
@@ -32,6 +42,12 @@ def test_load_bot_settings_from_env_parses_optional_review_channel() -> None:
         command_sync_guild_id=333,
         embedding_similarity_enabled=True,
         scam_template_path="templates/scams.json",
+        auto_delete_critical=True,
+        auto_delete_high=True,
+        critical_rule_score_threshold=18,
+        high_rule_score_threshold=9,
+        mod_review_threshold=0.8,
+        feedback_database_path="data/test-feedback.sqlite",
     )
 
 
@@ -82,3 +98,72 @@ def test_bot_registers_scam_config_command_group() -> None:
     assert "scam-config" in commands
     subcommands = {command.name for command in commands["scam-config"].commands}
     assert {"review-channel", "delete-enabled", "whitelist-role"}.issubset(subcommands)
+
+
+class FakeAuthor:
+    id = 10
+
+
+class FakeGuild:
+    id = 20
+
+
+class FakeChannel:
+    id = 30
+
+
+class FakeMessage:
+    def __init__(self, content: str) -> None:
+        self.id = 123
+        self.content = content
+        self.author = FakeAuthor()
+        self.guild = FakeGuild()
+        self.channel = FakeChannel()
+        self.deleted = False
+
+    async def delete(self) -> None:
+        self.deleted = True
+
+
+class FakeModChannel:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    async def send(self, summary: str) -> None:
+        self.messages.append(summary)
+
+
+@pytest.mark.asyncio
+async def test_critical_detection_deletes_logs_and_stores_pending_candidate(tmp_path) -> None:
+    repository = FeedbackRepository(tmp_path / "feedback.sqlite")
+    repository.initialize()
+    bot = ScamDetectionBot(
+        settings=BotSettings(),
+        feedback_repository=repository,
+    )
+    mod_channel = FakeModChannel()
+    bot.get_channel = lambda channel_id: mod_channel
+    message = FakeMessage("@everyone giving away my MacBook Air for free. DM me.")
+    result = DetectionResult(
+        eligible=True,
+        screening=ScreeningResult(triggered=True, reasons=["mass_mention"]),
+        rule_score=RuleScore(score=20, level=RiskLevel.CRITICAL, reasons=["mass_mention"]),
+        classifier_probability=None,
+        classifier_called=False,
+        decision=DecisionResult(Decision.DELETE, "critical_rule_score_auto_delete", ActionBand.CRITICAL),
+    )
+
+    await bot._handle_detected_message(
+        message=message,
+        result=result,
+        guild_config=GuildConfig(mod_review_channel_id=999, delete_enabled=True),
+    )
+
+    assert message.deleted
+    assert mod_channel.messages
+    record = repository.list_records()[0]
+    assert record.label is None
+    assert record.label_source == "bot_flag"
+    assert record.review_status == "pending"
+    assert record.needs_review
+    assert record.action_taken == "deleted"

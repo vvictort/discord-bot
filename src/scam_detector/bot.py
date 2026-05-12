@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 
 from src.detection.embedding_similarity import EmbeddingSimilarityMatcher
 from src.scam_detector.classifier import ScamClassifier
-from src.scam_detector.decisions import Decision
+from src.scam_detector.decisions import ActionBand, Decision, DecisionThresholds
+from src.scam_detector.feedback import FeedbackRepository
 from src.scam_detector.guild_config import GuildConfig, InMemoryGuildConfigStore
 from src.scam_detector.models import MessageContext
 from src.scam_detector.pipeline import DetectionPipeline, DetectionResult
@@ -27,6 +28,12 @@ class BotSettings:
     command_sync_guild_id: int | None = None
     embedding_similarity_enabled: bool = False
     scam_template_path: str | None = None
+    auto_delete_critical: bool = True
+    auto_delete_high: bool = False
+    critical_rule_score_threshold: int | None = None
+    high_rule_score_threshold: int | None = None
+    mod_review_threshold: float = 0.75
+    feedback_database_path: str | None = None
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:
@@ -67,6 +74,12 @@ def load_bot_settings_from_env(env: Mapping[str, str] | None = None) -> BotSetti
             default=False,
         ),
         scam_template_path=values.get("SCAM_TEMPLATE_PATH"),
+        auto_delete_critical=_parse_bool(values.get("AUTO_DELETE_CRITICAL"), default=True),
+        auto_delete_high=_parse_bool(values.get("AUTO_DELETE_HIGH"), default=False),
+        critical_rule_score_threshold=_parse_optional_int(values.get("CRITICAL_RULE_SCORE_THRESHOLD")),
+        high_rule_score_threshold=_parse_optional_int(values.get("HIGH_RULE_SCORE_THRESHOLD")),
+        mod_review_threshold=float(values.get("MOD_REVIEW_THRESHOLD", "0.75")),
+        feedback_database_path=values.get("FEEDBACK_DB_PATH", "data/feedback.sqlite"),
     )
 
 
@@ -76,6 +89,29 @@ def build_default_guild_config(settings: BotSettings) -> GuildConfig:
         delete_enabled=settings.delete_enabled,
         notify_log_actions=settings.notify_log_actions,
         whitelisted_role_ids=settings.whitelisted_role_ids,
+        auto_delete_critical=settings.auto_delete_critical,
+        auto_delete_high=settings.auto_delete_high,
+        critical_rule_score_threshold=settings.critical_rule_score_threshold,
+        high_rule_score_threshold=settings.high_rule_score_threshold,
+        mod_review_threshold=settings.mod_review_threshold,
+    )
+
+
+def build_decision_thresholds(config: GuildConfig) -> DecisionThresholds:
+    return DecisionThresholds(
+        mod_review=config.mod_review_threshold,
+        auto_delete_critical=config.auto_delete_critical,
+        auto_delete_high=config.auto_delete_high,
+        critical_rule_score_threshold=(
+            config.critical_rule_score_threshold
+            if config.critical_rule_score_threshold is not None
+            else DecisionThresholds().critical_rule_score_threshold
+        ),
+        high_rule_score_threshold=(
+            config.high_rule_score_threshold
+            if config.high_rule_score_threshold is not None
+            else DecisionThresholds().high_rule_score_threshold
+        ),
     )
 
 
@@ -154,6 +190,7 @@ class ScamDetectionBot(discord.Client):
         pipeline: DetectionPipeline | None = None,
         settings: BotSettings | None = None,
         config_store: InMemoryGuildConfigStore | None = None,
+        feedback_repository: FeedbackRepository | None = None,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -164,6 +201,7 @@ class ScamDetectionBot(discord.Client):
         self.config_store = config_store or InMemoryGuildConfigStore(
             default_config=build_default_guild_config(self.settings)
         )
+        self.feedback_repository = feedback_repository or self._build_feedback_repository()
         self.pipeline = pipeline or self._build_default_pipeline()
         self.tree = app_commands.CommandTree(self)
         self._register_config_commands()
@@ -192,27 +230,10 @@ class ScamDetectionBot(discord.Client):
         result = self.pipeline.detect(
             build_message_context(message),
             whitelisted_role_ids=guild_config.whitelisted_role_ids,
+            decision_thresholds=build_decision_thresholds(guild_config),
         )
         if result.decision.action != Decision.ALLOW:
-            summary = format_detection_summary(
-                author_id=message.author.id,
-                channel_id=message.channel.id,
-                content=message.content,
-                result=result,
-            )
-            print(summary)
-            await self._notify_moderators_if_needed(summary, result.decision.action, guild_config)
-
-        if result.decision.action == Decision.DELETE:
-            if not guild_config.delete_enabled:
-                print("Delete skipped because BOT_DELETE_ENABLED is false.")
-                return
-            try:
-                await message.delete()
-            except discord.Forbidden:
-                print("Delete failed: missing Discord permission to manage/delete messages.")
-            except discord.HTTPException as exc:
-                print(f"Delete failed: {exc}")
+            await self._handle_detected_message(message, result, guild_config)
 
     def _get_message_guild_config(self, message: discord.Message) -> GuildConfig:
         if message.guild is None:
@@ -245,6 +266,75 @@ class ScamDetectionBot(discord.Client):
             return
 
         await channel.send(summary)
+
+    async def _handle_detected_message(
+        self,
+        message: discord.Message,
+        result: DetectionResult,
+        guild_config: GuildConfig,
+    ) -> None:
+        summary = format_detection_summary(
+            author_id=message.author.id,
+            channel_id=message.channel.id,
+            content=message.content,
+            result=result,
+        )
+        print(summary)
+        await self._notify_moderators_if_needed(summary, result.decision.action, guild_config)
+
+        action_taken = result.decision.action.value
+        if result.decision.action == Decision.DELETE:
+            action_taken = await self._delete_message_if_allowed(message, guild_config)
+
+        self._store_pending_candidate(message, result, action_taken)
+
+    async def _delete_message_if_allowed(
+        self,
+        message: discord.Message,
+        guild_config: GuildConfig,
+    ) -> str:
+        if not guild_config.delete_enabled:
+            print("Delete skipped because BOT_DELETE_ENABLED is false.")
+            return "delete_skipped"
+
+        try:
+            await message.delete()
+        except discord.Forbidden:
+            print("Delete failed: missing Discord permission to manage/delete messages.")
+            return "delete_failed"
+        except discord.HTTPException as exc:
+            print(f"Delete failed: {exc}")
+            return "delete_failed"
+        return "deleted"
+
+    def _store_pending_candidate(
+        self,
+        message: discord.Message,
+        result: DetectionResult,
+        action_taken: str,
+    ) -> None:
+        if self.feedback_repository is None:
+            return
+        if result.decision.band not in {ActionBand.CRITICAL, ActionBand.HIGH, ActionBand.MEDIUM}:
+            return
+        if message.guild is None:
+            return
+
+        self.feedback_repository.add_pending_candidate(
+            message_id=message.id,
+            guild_id=message.guild.id,
+            channel_id=message.channel.id,
+            text=message.content,
+            reason=result.decision.reason,
+            action_taken=action_taken,
+        )
+
+    def _build_feedback_repository(self) -> FeedbackRepository | None:
+        if self.settings.feedback_database_path is None:
+            return None
+        repository = FeedbackRepository(self.settings.feedback_database_path)
+        repository.initialize()
+        return repository
 
     def _build_default_pipeline(self) -> DetectionPipeline:
         embedding_similarity = (

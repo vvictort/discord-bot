@@ -9,6 +9,11 @@ class GuildConfig:
     delete_enabled: bool = True
     notify_log_actions: bool = True
     whitelisted_role_ids: frozenset[int] = frozenset()
+    auto_delete_critical: bool = True
+    auto_delete_high: bool = False
+    critical_rule_score_threshold: int | None = None
+    high_rule_score_threshold: int | None = None
+    mod_review_threshold: float = 0.75
 
 
 class InMemoryGuildConfigStore:

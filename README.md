@@ -35,12 +35,37 @@ The runtime path intentionally avoids expensive ML on ordinary chat traffic:
 - Tier 2 scoring: suspicious messages receive deterministic risk scoring from content and metadata.
 - Tier 3 embedding similarity: optional known-template similarity runs only for cheap-screened medium/uncertain messages.
 - Tier 4 classifier: the optional sklearn model is called only for uncertain messages that still need help after rules and embeddings.
-- Decision engine: low risk is allowed, medium confidence can be logged or reviewed, and only high-confidence classifier output can auto-delete.
+- Decision engine: low risk is allowed, medium confidence goes to review, and critical/high-confidence detections can take immediate action.
 - Feedback loop: moderator-confirmed scam and false-positive labels are stored for future training.
 
 Rules are the primary safety layer. They are deterministic, explainable, and catch obvious scam templates without needing ML. Embedding similarity is a secondary optional layer for wording changes that are close to known giveaway scams. The trained classifier is a separate optional model trained from labeled data.
 
 Embeddings do not replace rules and are not run on every message. The bot only calls embedding similarity after cheap screening has triggered and the rule score is still low/medium. Critical or high rule scores skip embeddings and classifier calls because the rule evidence is already strong. This keeps normal chat cheap and avoids using semantic similarity as a broad surveillance step.
+
+## Action bands
+
+The bot uses action bands so high-confidence scam messages do not stay visible while waiting for review:
+
+- `CRITICAL`: delete immediately when `AUTO_DELETE_CRITICAL=true`, log evidence to the mod channel, and store a pending review candidate.
+- `HIGH`: delete when `AUTO_DELETE_HIGH=true`; otherwise send to mod review.
+- `MEDIUM`: send to mod review without auto-delete by default.
+- `LOW`: allow unless manually reported.
+
+Bot-flagged candidates are stored as pending review items, not training labels:
+
+- `label = null`
+- `label_source = bot_flag`
+- `review_status = pending`
+- `needs_review = true`
+- `action_taken = deleted`, `review`, or another action outcome
+
+Moderator outcomes determine training eligibility:
+
+- Confirm Scam: `label = scam`, `label_source = moderator_confirmed`
+- False Positive: `label = not_scam`, `label_source = moderator_confirmed`
+- Ignore: `review_status = ignored`
+
+User reports are weak signals. They increase review priority, but they do not directly delete messages and do not become training labels.
 
 ## Dataset
 
@@ -135,7 +160,7 @@ Starting thresholds:
 - Mod review: `0.75`
 - Log only: `0.55`
 
-Medium-confidence messages should go to moderator review instead of being deleted automatically.
+Medium-confidence messages should go to moderator review instead of being deleted automatically. Critical rule detections are different: they can be deleted immediately because the rule evidence is already high confidence.
 
 ## Feedback data
 
@@ -159,6 +184,12 @@ WHITELISTED_ROLE_IDS=admin-role-id,moderator-role-id
 COMMAND_SYNC_GUILD_ID=your-private-server-id
 EMBEDDING_SIMILARITY_ENABLED=false
 # SCAM_TEMPLATE_PATH=optional/path/to/templates.json
+AUTO_DELETE_CRITICAL=true
+AUTO_DELETE_HIGH=false
+CRITICAL_RULE_SCORE_THRESHOLD=16
+HIGH_RULE_SCORE_THRESHOLD=8
+MOD_REVIEW_THRESHOLD=0.75
+FEEDBACK_DB_PATH=data/feedback.sqlite
 ```
 
 Run the bot:
@@ -176,6 +207,12 @@ Optional bot settings:
 - `COMMAND_SYNC_GUILD_ID`: sync slash commands to one server immediately during testing.
 - `EMBEDDING_SIMILARITY_ENABLED=true`: enable optional known-template similarity for medium/uncertain suspicious messages.
 - `SCAM_TEMPLATE_PATH`: optional JSON template file. If omitted, anonymized local giveaway templates are used.
+- `AUTO_DELETE_CRITICAL`: delete critical rule detections immediately when possible.
+- `AUTO_DELETE_HIGH`: delete high rule detections instead of sending them to review.
+- `CRITICAL_RULE_SCORE_THRESHOLD`: rule score needed for the critical action band.
+- `HIGH_RULE_SCORE_THRESHOLD`: rule score needed for the high action band.
+- `MOD_REVIEW_THRESHOLD`: classifier probability threshold for mod review.
+- `FEEDBACK_DB_PATH`: SQLite path for pending candidates and moderator-confirmed labels.
 
 For a private server, also check Discord configuration:
 
@@ -185,7 +222,7 @@ For a private server, also check Discord configuration:
 4. Add trusted admin/mod roles to `WHITELISTED_ROLE_IDS` so their messages bypass detection.
 5. Restart the bot after changing `.env` or Developer Portal settings.
 
-Most test scam messages will not auto-delete immediately. Medium confidence becomes `log`, high rule-only confidence becomes `review`, and auto-delete requires a classifier probability above the auto-delete threshold.
+Medium confidence becomes `review`. Critical rule-only confidence can delete immediately when `AUTO_DELETE_CRITICAL=true`. High rule confidence deletes only when `AUTO_DELETE_HIGH=true`.
 
 Embedding similarity is disabled by default. If enabled, missing template files or optional embedding backends fail closed: the bot logs the unavailable layer and continues with rule/classifier behavior.
 

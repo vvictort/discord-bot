@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from src.detection.embedding_similarity import EmbeddingSimilarityResult
-from src.scam_detector.decisions import DecisionResult, decide_action
+from src.scam_detector.decisions import DecisionResult, DecisionThresholds, decide_action
 from src.scam_detector.models import MessageContext, ScreeningResult
 from src.scam_detector.preprocessing import is_eligible_message
 from src.scam_detector.scoring import RiskLevel, RuleScore, risk_level_for_score, score_message
@@ -61,7 +61,10 @@ class DetectionPipeline:
         self,
         message: MessageContext,
         whitelisted_role_ids: set[int] | frozenset[int] | None = None,
+        decision_thresholds: DecisionThresholds | None = None,
+        user_report_count: int = 0,
     ) -> DetectionResult:
+        thresholds = decision_thresholds or DecisionThresholds()
         if not is_eligible_message(message):
             return DetectionResult(
                 eligible=False,
@@ -69,7 +72,12 @@ class DetectionPipeline:
                 rule_score=None,
                 classifier_probability=None,
                 classifier_called=False,
-                decision=decide_action(rule_score=0, classifier_probability=None),
+                decision=decide_action(
+                    rule_score=0,
+                    classifier_probability=None,
+                    thresholds=thresholds,
+                    user_report_count=user_report_count,
+                ),
                 classifier_skip_reason="ineligible_message",
                 embedding_skip_reason="ineligible_message",
             )
@@ -86,7 +94,12 @@ class DetectionPipeline:
                 rule_score=None,
                 classifier_probability=None,
                 classifier_called=False,
-                decision=decide_action(rule_score=0, classifier_probability=None),
+                decision=decide_action(
+                    rule_score=0,
+                    classifier_probability=None,
+                    thresholds=thresholds,
+                    user_report_count=user_report_count,
+                ),
                 classifier_skip_reason="whitelisted_role",
                 embedding_skip_reason="whitelisted_role",
             )
@@ -99,7 +112,12 @@ class DetectionPipeline:
                 rule_score=None,
                 classifier_probability=None,
                 classifier_called=False,
-                decision=decide_action(rule_score=0, classifier_probability=None),
+                decision=decide_action(
+                    rule_score=0,
+                    classifier_probability=None,
+                    thresholds=thresholds,
+                    user_report_count=user_report_count,
+                ),
                 classifier_skip_reason="screening_not_triggered",
                 embedding_skip_reason="screening_not_triggered",
             )
@@ -114,7 +132,7 @@ class DetectionPipeline:
         embedding_matched_category = None
         embedding_skip_reason = None
 
-        if rule_score.level in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
+        if rule_score.score >= thresholds.high_rule_score_threshold:
             embedding_skip_reason = f"{rule_score.level.value}_rule_score"
         elif self.embedding_similarity is not None:
             embedding_called = True
@@ -133,7 +151,7 @@ class DetectionPipeline:
         classifier_skip_reason = None
         # Classifier is last: it can help medium cases, but it must not override
         # high-confidence rule/template evidence.
-        if rule_score.level in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
+        if rule_score.score >= thresholds.high_rule_score_threshold:
             classifier_skip_reason = f"{rule_score.level.value}_rule_score"
         elif self.classifier is not None and rule_score.level == RiskLevel.MEDIUM:
             classifier_called = True
@@ -147,7 +165,12 @@ class DetectionPipeline:
             rule_score=rule_score,
             classifier_probability=classifier_probability,
             classifier_called=classifier_called,
-            decision=decide_action(rule_score=rule_score.score, classifier_probability=classifier_probability),
+            decision=decide_action(
+                rule_score=rule_score.score,
+                classifier_probability=classifier_probability,
+                thresholds=thresholds,
+                user_report_count=user_report_count,
+            ),
             classifier_skip_reason=classifier_skip_reason,
             embedding_called=embedding_called,
             embedding_similarity=embedding_similarity_score,

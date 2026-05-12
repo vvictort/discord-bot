@@ -1,4 +1,4 @@
-from src.scam_detector.decisions import Decision, DecisionThresholds, decide_action
+from src.scam_detector.decisions import ActionBand, Decision, DecisionThresholds, decide_action
 from src.scam_detector.models import MessageContext
 from src.scam_detector.pipeline import DetectionPipeline
 from src.scam_detector.scoring import HIGH_RULE_SCORE, RiskLevel, score_message
@@ -147,10 +147,19 @@ def test_decision_allows_low_risk_messages() -> None:
     assert decision.action == Decision.ALLOW
 
 
-def test_decision_logs_medium_rule_score_without_classifier() -> None:
+def test_user_report_alone_does_not_delete_low_risk_message() -> None:
+    decision = decide_action(rule_score=0, classifier_probability=None, user_report_count=10)
+
+    assert decision.action == Decision.REVIEW
+    assert decision.band == ActionBand.LOW
+    assert decision.reason == "user_report_review_priority"
+
+
+def test_decision_reviews_medium_rule_score_without_classifier() -> None:
     decision = decide_action(rule_score=3, classifier_probability=None)
 
-    assert decision.action == Decision.LOG
+    assert decision.action == Decision.REVIEW
+    assert decision.band == ActionBand.MEDIUM
 
 
 def test_decision_flags_review_for_mod_review_probability_band() -> None:
@@ -171,6 +180,33 @@ def test_high_rule_score_is_not_weakened_by_low_classifier_probability() -> None
     decision = decide_action(rule_score=HIGH_RULE_SCORE, classifier_probability=0.01)
 
     assert decision.action == Decision.REVIEW
+    assert decision.band == ActionBand.HIGH
+
+
+def test_critical_rule_score_deletes_by_default_even_with_low_classifier_probability() -> None:
+    score = score_message(MessageContext(text=KNOWN_GIVEAWAY_SCAM_MESSAGES[0], author_id=1))
+
+    decision = decide_action(rule_score=score.score, classifier_probability=0.01)
+
+    assert score.level == RiskLevel.CRITICAL
+    assert decision.action == Decision.DELETE
+    assert decision.band == ActionBand.CRITICAL
+
+
+def test_high_rule_score_delete_depends_on_config() -> None:
+    review_decision = decide_action(
+        rule_score=HIGH_RULE_SCORE,
+        classifier_probability=None,
+        thresholds=DecisionThresholds(auto_delete_high=False),
+    )
+    delete_decision = decide_action(
+        rule_score=HIGH_RULE_SCORE,
+        classifier_probability=None,
+        thresholds=DecisionThresholds(auto_delete_high=True),
+    )
+
+    assert review_decision.action == Decision.REVIEW
+    assert delete_decision.action == Decision.DELETE
 
 
 def test_obvious_rule_based_scam_skips_classifier() -> None:
@@ -184,4 +220,4 @@ def test_obvious_rule_based_scam_skips_classifier() -> None:
     assert result.classifier_called is False
     assert result.classifier_skip_reason in {"high_rule_score", "critical_rule_score"}
     assert classifier.calls == 0
-    assert result.decision.action == Decision.REVIEW
+    assert result.decision.action == Decision.DELETE
