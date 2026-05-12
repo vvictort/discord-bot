@@ -9,6 +9,7 @@ data/raw/
 data/processed/
 models/*.joblib
 models/*.pkl
+models/*.json
 *.sqlite
 *.db
 .DS_Store
