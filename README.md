@@ -7,9 +7,10 @@ The project is built around a cheap-first detection pipeline:
 1. Ignore ineligible messages.
 2. Run lightweight trigger screening.
 3. Score suspicious messages with deterministic rules.
-4. Optionally call an ML classifier only for suspicious messages.
-5. Decide whether to allow, log, send to review, or delete.
-6. Store moderator-confirmed labels for future training.
+4. Optionally compare uncertain suspicious messages against known scam-template embeddings.
+5. Optionally call an ML classifier only for suspicious messages.
+6. Decide whether to allow, log, send to review, or delete.
+7. Store moderator-confirmed labels for future training.
 
 ## Local setup
 
@@ -32,9 +33,14 @@ The runtime path intentionally avoids expensive ML on ordinary chat traffic:
 - Tier 0 eligibility: empty messages, bot authors, and non-guild messages are ignored.
 - Tier 1 screening: cheap keyword, link, and mention checks run on eligible messages.
 - Tier 2 scoring: suspicious messages receive deterministic risk scoring from content and metadata.
-- Tier 3 classifier: the optional sklearn model is called only for medium or high rule-risk messages.
+- Tier 3 embedding similarity: optional known-template similarity runs only for cheap-screened medium/uncertain messages.
+- Tier 4 classifier: the optional sklearn model is called only for uncertain messages that still need help after rules and embeddings.
 - Decision engine: low risk is allowed, medium confidence can be logged or reviewed, and only high-confidence classifier output can auto-delete.
 - Feedback loop: moderator-confirmed scam and false-positive labels are stored for future training.
+
+Rules are the primary safety layer. They are deterministic, explainable, and catch obvious scam templates without needing ML. Embedding similarity is a secondary optional layer for wording changes that are close to known giveaway scams. The trained classifier is a separate optional model trained from labeled data.
+
+Embeddings do not replace rules and are not run on every message. The bot only calls embedding similarity after cheap screening has triggered and the rule score is still low/medium. Critical or high rule scores skip embeddings and classifier calls because the rule evidence is already strong. This keeps normal chat cheap and avoids using semantic similarity as a broad surveillance step.
 
 ## Dataset
 
@@ -151,6 +157,8 @@ DISCORD_TOKEN=your-token-here
 MOD_REVIEW_CHANNEL_ID=your-mod-review-channel-id
 WHITELISTED_ROLE_IDS=admin-role-id,moderator-role-id
 COMMAND_SYNC_GUILD_ID=your-private-server-id
+EMBEDDING_SIMILARITY_ENABLED=false
+# SCAM_TEMPLATE_PATH=optional/path/to/templates.json
 ```
 
 Run the bot:
@@ -166,6 +174,8 @@ Optional bot settings:
 - `BOT_DELETE_ENABLED=false`: dry-run mode; detections are reported but messages are not deleted.
 - `BOT_NOTIFY_LOG_ACTIONS=false`: only review/delete events go to the mod channel.
 - `COMMAND_SYNC_GUILD_ID`: sync slash commands to one server immediately during testing.
+- `EMBEDDING_SIMILARITY_ENABLED=true`: enable optional known-template similarity for medium/uncertain suspicious messages.
+- `SCAM_TEMPLATE_PATH`: optional JSON template file. If omitted, anonymized local giveaway templates are used.
 
 For a private server, also check Discord configuration:
 
@@ -176,6 +186,8 @@ For a private server, also check Discord configuration:
 5. Restart the bot after changing `.env` or Developer Portal settings.
 
 Most test scam messages will not auto-delete immediately. Medium confidence becomes `log`, high rule-only confidence becomes `review`, and auto-delete requires a classifier probability above the auto-delete threshold.
+
+Embedding similarity is disabled by default. If enabled, missing template files or optional embedding backends fail closed: the bot logs the unavailable layer and continues with rule/classifier behavior.
 
 To copy a role ID, enable Discord Developer Mode, open **Server Settings > Roles**, right-click the role, and choose **Copy Role ID**. Avoid whitelisting `@everyone`, because that bypasses detection for the whole server.
 

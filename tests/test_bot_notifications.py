@@ -19,6 +19,8 @@ def test_load_bot_settings_from_env_parses_optional_review_channel() -> None:
             "BOT_NOTIFY_LOG_ACTIONS": "true",
             "WHITELISTED_ROLE_IDS": "111, 222",
             "COMMAND_SYNC_GUILD_ID": "333",
+            "EMBEDDING_SIMILARITY_ENABLED": "true",
+            "SCAM_TEMPLATE_PATH": "templates/scams.json",
         }
     )
 
@@ -28,6 +30,8 @@ def test_load_bot_settings_from_env_parses_optional_review_channel() -> None:
         notify_log_actions=True,
         whitelisted_role_ids=frozenset({111, 222}),
         command_sync_guild_id=333,
+        embedding_similarity_enabled=True,
+        scam_template_path="templates/scams.json",
     )
 
 

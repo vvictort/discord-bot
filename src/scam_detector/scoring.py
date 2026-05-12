@@ -71,16 +71,17 @@ def score_message(message: MessageContext) -> RuleScore:
         score += 1
         reasons.append("no_roles")
 
-    if score >= CRITICAL_RULE_SCORE:
-        level = RiskLevel.CRITICAL
-    elif score >= HIGH_RULE_SCORE:
-        level = RiskLevel.HIGH
-    elif score >= MEDIUM_RULE_SCORE:
-        level = RiskLevel.MEDIUM
-    else:
-        level = RiskLevel.LOW
+    return RuleScore(score=score, level=risk_level_for_score(score), reasons=reasons)
 
-    return RuleScore(score=score, level=level, reasons=reasons)
+
+def risk_level_for_score(score: int) -> RiskLevel:
+    if score >= CRITICAL_RULE_SCORE:
+        return RiskLevel.CRITICAL
+    if score >= HIGH_RULE_SCORE:
+        return RiskLevel.HIGH
+    if score >= MEDIUM_RULE_SCORE:
+        return RiskLevel.MEDIUM
+    return RiskLevel.LOW
 
 
 def _score_signals(signals: set[str]) -> int:

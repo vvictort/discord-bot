@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 from dotenv import load_dotenv
 
+from src.detection.embedding_similarity import EmbeddingSimilarityMatcher
 from src.scam_detector.classifier import ScamClassifier
 from src.scam_detector.decisions import Decision
 from src.scam_detector.guild_config import GuildConfig, InMemoryGuildConfigStore
@@ -22,6 +23,8 @@ class BotSettings:
     notify_log_actions: bool = True
     whitelisted_role_ids: frozenset[int] = frozenset()
     command_sync_guild_id: int | None = None
+    embedding_similarity_enabled: bool = False
+    scam_template_path: str | None = None
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:
@@ -56,6 +59,11 @@ def load_bot_settings_from_env(env: Mapping[str, str] | None = None) -> BotSetti
             if values.get("COMMAND_SYNC_GUILD_ID")
             else None
         ),
+        embedding_similarity_enabled=_parse_bool(
+            values.get("EMBEDDING_SIMILARITY_ENABLED"),
+            default=False,
+        ),
+        scam_template_path=values.get("SCAM_TEMPLATE_PATH"),
     )
 
 
@@ -96,12 +104,20 @@ def format_detection_summary(
             f"Final score: {rule_score}",
             f"Rule level: {rule_level}",
             f"Screening reasons: {', '.join(result.screening.reasons) or 'none'}",
+            f"Embedding called: {result.embedding_called}",
+            f"Embedding similarity: {_format_optional_float(result.embedding_similarity)}",
+            f"Embedding match category: {result.embedding_matched_category or 'none'}",
+            f"Embedding skip reason: {result.embedding_skip_reason or 'none'}",
             f"Classifier called: {result.classifier_called}",
             f"Classifier skip reason: {result.classifier_skip_reason or 'none'}",
             f"Classifier probability: {probability}",
             f"Message: `{preview}`",
         ]
     )
+
+
+def _format_optional_float(value: float | None) -> str:
+    return f"{value:.3f}" if value is not None else "none"
 
 
 def build_message_context(message: discord.Message) -> MessageContext:
@@ -144,6 +160,11 @@ class ScamDetectionBot(discord.Client):
         )
         self.pipeline = pipeline or DetectionPipeline(
             classifier=ScamClassifier(),
+            embedding_similarity=(
+                EmbeddingSimilarityMatcher(template_path=self.settings.scam_template_path)
+                if self.settings.embedding_similarity_enabled
+                else None
+            ),
             whitelisted_role_ids=self.settings.whitelisted_role_ids,
         )
         self.tree = app_commands.CommandTree(self)
