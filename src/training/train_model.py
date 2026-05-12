@@ -15,7 +15,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.scam_detector.features import METADATA_FEATURES
 from src.training.dataset_loader import (
     DEFAULT_DATASET_NAME,
     DEFAULT_OUTPUT_DIR,
@@ -30,6 +29,15 @@ from src.training.evaluation import DEFAULT_THRESHOLDS, evaluate_model, evaluate
 MODEL_OUTPUT = Path("models/scam_classifier.joblib")
 THRESHOLD_OUTPUT = Path("models/thresholds.json")
 METRICS_OUTPUT = Path("models/metrics.json")
+
+METADATA_FEATURES = (
+    "message_length",
+    "word_count",
+    "has_link",
+    "has_mention",
+    "num_roles",
+    "time_since_join",
+)
 
 ClassWeight = Literal["balanced"] | None
 

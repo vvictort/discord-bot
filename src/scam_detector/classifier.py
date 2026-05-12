@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.scam_detector.features import METADATA_FEATURES
+import joblib
+import pandas as pd
+
 from src.scam_detector.models import MessageContext
+from src.training.train_model import METADATA_FEATURES
 
 
 class ScamClassifier:
@@ -22,8 +25,8 @@ class ScamClassifier:
         if model is None:
             return None
 
+        frame = self._message_to_frame(message)
         try:
-            frame = self._message_to_frame(message)
             probability = model.predict_proba(frame)[:, 1][0]
         except Exception:
             return None
@@ -38,17 +41,13 @@ class ScamClassifier:
             return None
 
         try:
-            import joblib
-
             self._model = joblib.load(self.model_path)
         except Exception:
             self._model = None
         return self._model
 
     @staticmethod
-    def _message_to_frame(message: MessageContext) -> Any:
-        import pandas as pd
-
+    def _message_to_frame(message: MessageContext) -> pd.DataFrame:
         payload: dict[str, object] = {
             "text": message.text or "",
             "message_length": message.message_length,
@@ -58,12 +57,4 @@ class ScamClassifier:
             "num_roles": message.num_roles,
             "time_since_join": message.member_join_age_seconds,
         }
-        return pd.DataFrame(
-            [
-                {
-                    key: value
-                    for key, value in payload.items()
-                    if key == "text" or key in METADATA_FEATURES
-                }
-            ]
-        )
+        return pd.DataFrame([{key: value for key, value in payload.items() if key == "text" or key in METADATA_FEATURES}])
