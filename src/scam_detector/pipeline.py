@@ -34,7 +34,11 @@ class DetectionPipeline:
         self.classifier = classifier
         self.whitelisted_role_ids = frozenset(whitelisted_role_ids or set())
 
-    def detect(self, message: MessageContext) -> DetectionResult:
+    def detect(
+        self,
+        message: MessageContext,
+        whitelisted_role_ids: set[int] | frozenset[int] | None = None,
+    ) -> DetectionResult:
         if not is_eligible_message(message):
             return DetectionResult(
                 eligible=False,
@@ -45,7 +49,12 @@ class DetectionPipeline:
                 decision=decide_action(rule_score=0, classifier_probability=None),
             )
 
-        if self._has_whitelisted_role(message):
+        active_whitelist = (
+            frozenset(whitelisted_role_ids)
+            if whitelisted_role_ids is not None
+            else self.whitelisted_role_ids
+        )
+        if self._has_whitelisted_role(message, active_whitelist):
             return DetectionResult(
                 eligible=True,
                 screening=ScreeningResult(triggered=False, reasons=["whitelisted_role"]),
@@ -82,7 +91,11 @@ class DetectionPipeline:
             decision=decide_action(rule_score=rule_score.score, classifier_probability=classifier_probability),
         )
 
-    def _has_whitelisted_role(self, message: MessageContext) -> bool:
-        if not self.whitelisted_role_ids:
+    def _has_whitelisted_role(
+        self,
+        message: MessageContext,
+        whitelisted_role_ids: frozenset[int],
+    ) -> bool:
+        if not whitelisted_role_ids:
             return False
-        return bool(self.whitelisted_role_ids.intersection(message.author_role_ids))
+        return bool(whitelisted_role_ids.intersection(message.author_role_ids))
