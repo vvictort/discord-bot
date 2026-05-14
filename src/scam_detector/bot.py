@@ -174,55 +174,72 @@ def build_moderation_log_payload(
     result: DetectionResult,
     action_taken: str,
 ) -> ModerationLogPayload:
-    """Build a Discord embed that reads like a compact moderation snapshot."""
+    """Build a compact, AutoMod-style Discord embed for moderator alerts."""
 
     channel_label = _format_channel_reference(message.channel)
-    content = _format_moderation_log_content(
-        action=result.decision.action,
-        action_taken=action_taken,
-        channel_label=channel_label,
-    )
+    action_verb = _action_verb(result.decision.action, action_taken)
+    content = f"**Scam Bot** {action_verb} in {channel_label}"
+
     jump_url = getattr(message, "jump_url", None)
+    preview = _truncate_for_discord((message.content or "").strip() or "[empty message]", limit=1800)
+
+    # Build a compact description: author line, quoted message, then metadata.
+    author_name = _format_author_name(message.author)
+    quoted = "\n".join(f"> {line}" if line else ">" for line in preview.splitlines())
+    metadata_line = _build_metadata_line(result, action_taken)
+
+    description = f"**{author_name}**\n{quoted}\n{metadata_line}"
 
     embed = discord.Embed(
-        title=_format_tagged_snapshot_title(result.decision.action, action_taken),
-        description=_format_message_snapshot(message),
-        url=jump_url,
-        color=_embed_color_for_result(result, action_taken),
+        description=_truncate_for_discord(description, limit=4000),
+        color=_embed_color_for_action(result.decision.action, action_taken),
         timestamp=getattr(message, "created_at", None) or discord.utils.utcnow(),
     )
 
-    author_name = _format_author_name(message.author)
     author_icon_url = _format_author_icon_url(message.author)
     if author_icon_url:
         embed.set_author(name=author_name, icon_url=author_icon_url)
     else:
         embed.set_author(name=author_name)
 
-    embed.add_field(
-        name="__Probability Score__",
-        value=_truncate_for_discord(_format_probability_score(result)),
-        inline=False,
-    )
-    embed.add_field(
-        name="__Risk Summary__",
-        value=_truncate_for_discord(_format_risk_summary(result)),
-        inline=False,
-    )
-    embed.add_field(
-        name="__Action Taken__",
-        value=_truncate_for_discord(_format_action_taken(result, action_taken)),
-        inline=False,
-    )
-
-    message_id = getattr(message, "id", "unknown")
-    embed.set_footer(text=f"Message ID: {message_id}")
-
     return ModerationLogPayload(
         content=content,
         embed=embed,
-        view=_build_moderation_log_view(message),
+        view=_build_moderation_log_view(message, jump_url),
     )
+
+
+def _action_verb(action: Decision, action_taken: str) -> str:
+    """Return a past-tense phrase describing what happened (e.g. 'has blocked a message')."""
+    if action_taken == "deleted":
+        return "has blocked a message"
+    if action_taken == "delete_failed":
+        return "attempted to block a message"
+    if action_taken == "delete_skipped":
+        return "flagged a message (delete skipped)"
+    if action == Decision.REVIEW:
+        return "has flagged a message for review"
+    if action == Decision.LOG:
+        return "has logged a message"
+    return "has flagged a message"
+
+
+def _build_metadata_line(result: DetectionResult, action_taken: str) -> str:
+    """Build a single compact metadata line like: 'Signals: X, Y · Rule: Z · Risk: Critical'."""
+    parts: list[str] = []
+
+    # Signals
+    if result.rule_score and result.rule_score.reasons:
+        signals = _format_key_signals(result.rule_score.reasons)
+        parts.append(f"Signals: {signals}")
+
+    # Rule / reason
+    parts.append(f"Rule: {_humanize_label(result.decision.reason)}")
+
+    # Action taken
+    parts.append(f"Action: {_humanize_action_taken(action_taken)}")
+
+    return " · ".join(parts)
 
 
 def _format_optional_float(value: float | None) -> str:
@@ -241,152 +258,16 @@ def _format_channel_reference(channel: object) -> str:
     return "unknown channel"
 
 
-def _format_moderation_log_content(
-    action: Decision,
-    action_taken: str,
-    channel_label: str,
-) -> str:
-    return "\n".join(
-        [
-            "__**AutoMod Alert**__",
-            "",
-            _format_colored_status_line(action, action_taken),
-            "",
-            f"**[CHANNEL] Channel:** {channel_label}",
-        ]
-    )
-
-
-def _format_colored_status_line(action: Decision, action_taken: str) -> str:
-    escape = "\u001b"
-    color = _ansi_color_for_status(action, action_taken)
-    status_tag = _format_status_tag(action, action_taken)
-    status_text = _format_event_summary(action, action_taken)
-    return f"```ansi\n{escape}[1;{color}m{status_tag} {status_text}{escape}[0m\n```"
-
-
-def _ansi_color_for_status(action: Decision, action_taken: str) -> int:
-    if action_taken == "deleted":
-        return 31
-    if action_taken in {"delete_failed", "delete_skipped"}:
-        return 33
-    if action == Decision.REVIEW:
-        return 33
-    if action == Decision.LOG:
-        return 36
-    if action == Decision.ALLOW:
-        return 32
-    return 37
-
-
-def _format_status_tag(action: Decision, action_taken: str) -> str:
-    if action_taken == "deleted":
-        return "[BLOCKED]"
-    if action_taken == "delete_failed":
-        return "[DELETE FAILED]"
-    if action_taken == "delete_skipped":
-        return "[DELETE SKIPPED]"
-    if action == Decision.REVIEW:
-        return "[REVIEW]"
-    if action == Decision.LOG:
-        return "[LOG]"
-    if action == Decision.DELETE:
-        return "[DELETE]"
-    return f"[{action.value.upper()}]"
-
-
-def _format_event_summary(action: Decision, action_taken: str) -> str:
-    if action_taken == "deleted":
-        return "Blocked message"
-    if action == Decision.REVIEW:
-        return "Flagged for moderator review"
-    if action == Decision.LOG:
-        return "Logged message"
-    if action == Decision.DELETE:
-        return "Flagged for deletion"
-    return _humanize_label(action.value)
-
-
-def _format_tagged_snapshot_title(action: Decision, action_taken: str) -> str:
-    status_tag = _format_status_tag(action, action_taken)
-    snapshot_title = _format_snapshot_title(action, action_taken)
-    return f"{status_tag} {snapshot_title}"
-
-
-def _format_snapshot_title(action: Decision, action_taken: str) -> str:
-    if action_taken == "deleted":
-        return "Blocked Message Snapshot"
-    if action == Decision.REVIEW:
-        return "Review Message Snapshot"
-    if action == Decision.LOG:
-        return "Logged Message Snapshot"
-    return "Moderation Snapshot"
-
-
-def _format_message_snapshot(message: discord.Message) -> str:
-    preview = (message.content or "").strip() or "[empty message]"
-    preview = _truncate_for_discord(preview, limit=1600)
-    quoted_preview = "\n".join(f"> {line}" if line else ">" for line in preview.splitlines())
-    return "\n\n".join(
-        [
-            "__**[MESSAGE] Message**__",
-            quoted_preview,
-        ]
-    )
-
-
-def _format_author_name(author: object) -> str:
-    author_id = getattr(author, "id", "unknown")
-    display_name = (
-        getattr(author, "display_name", None)
-        or getattr(author, "global_name", None)
-        or getattr(author, "name", None)
-        or str(author_id)
-    )
-    return f"{display_name} ({author_id})"
-
-
-def _format_author_icon_url(author: object) -> str | None:
-    avatar = getattr(author, "display_avatar", None) or getattr(author, "avatar", None)
-    url = getattr(avatar, "url", None)
-    return str(url) if url else None
-
-
-def _embed_color_for_result(result: DetectionResult, action_taken: str) -> discord.Color:
+def _embed_color_for_action(action: Decision, action_taken: str) -> discord.Color:
     if action_taken == "deleted":
         return discord.Color.red()
-    if result.decision.action == Decision.DELETE:
+    if action in {Decision.DELETE}:
         return discord.Color.dark_red()
-    if result.decision.action == Decision.REVIEW:
+    if action == Decision.REVIEW:
         return discord.Color.orange()
-    if result.decision.action == Decision.LOG:
+    if action == Decision.LOG:
         return discord.Color.blurple()
     return discord.Color.light_grey()
-
-
-def _format_probability_score(result: DetectionResult) -> str:
-    return f"**[SCORE]** **{_format_classifier_probability(result)}**"
-
-
-def _format_classifier_probability(result: DetectionResult) -> str:
-    if result.classifier_probability is not None:
-        percentage = result.classifier_probability * 100
-        return f"{percentage:.1f}% ({result.classifier_probability:.3f})"
-    return "Not evaluated"
-
-
-def _format_risk_summary(result: DetectionResult) -> str:
-    if result.rule_score is None:
-        return "**[RISK]** **None**"
-
-    return "\n\n".join(
-        [
-            f"**[RISK]** **{_humanize_label(result.rule_score.level.value)}**",
-            f"**Rule score:** {result.rule_score.score}",
-            f"**Band:** {_humanize_label(result.decision.band.value)}",
-            f"**Signals:** {_format_key_signals(result.rule_score.reasons)}",
-        ]
-    )
 
 
 def _format_key_signals(reasons: list[str], limit: int = 4) -> str:
@@ -399,24 +280,28 @@ def _format_key_signals(reasons: list[str], limit: int = 4) -> str:
     return ", ".join(shown)
 
 
-def _format_action_taken(result: DetectionResult, action_taken: str) -> str:
-    return "\n".join(
-        [
-            f"**[ACTION]** **{_humanize_action_taken(action_taken)}**",
-            "",
-            f"**Decision:** {_humanize_label(result.decision.action.value)}",
-            f"**Reason:** {_humanize_label(result.decision.reason)}",
-        ]
+def _format_author_name(author: object) -> str:
+    display_name = (
+        getattr(author, "display_name", None)
+        or getattr(author, "global_name", None)
+        or getattr(author, "name", None)
     )
+    return display_name or str(getattr(author, "id", "unknown"))
+
+
+def _format_author_icon_url(author: object) -> str | None:
+    avatar = getattr(author, "display_avatar", None) or getattr(author, "avatar", None)
+    url = getattr(avatar, "url", None)
+    return str(url) if url else None
 
 
 def _humanize_action_taken(action_taken: str) -> str:
     labels = {
-        "deleted": "Deleted message",
-        "delete_skipped": "Delete skipped by configuration",
+        "deleted": "Blocked",
+        "delete_skipped": "Delete skipped",
         "delete_failed": "Delete failed",
-        "review": "Sent to moderator review",
-        "log": "Logged only",
+        "review": "Flagged for review",
+        "log": "Logged",
         "allow": "Allowed",
     }
     return labels.get(action_taken, _humanize_label(action_taken))
@@ -435,8 +320,10 @@ def _humanize_label(value: str) -> str:
     return label
 
 
-def _build_moderation_log_view(message: discord.Message) -> discord.ui.View | None:
-    jump_url = getattr(message, "jump_url", None)
+def _build_moderation_log_view(
+    message: discord.Message,
+    jump_url: str | None,
+) -> discord.ui.View | None:
     if not jump_url:
         return None
 

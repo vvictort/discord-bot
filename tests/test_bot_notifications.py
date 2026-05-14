@@ -137,7 +137,7 @@ class FakeModChannel:
         self.messages.append({"args": args, "kwargs": kwargs})
 
 
-def test_build_moderation_log_payload_contains_snapshot_probability_and_action() -> None:
+def test_build_moderation_log_payload_contains_compact_automod_style_alert() -> None:
     message = FakeMessage("Hello @everyone\nFree PS5 giveaway, DM me if interested.")
     result = DetectionResult(
         eligible=True,
@@ -153,37 +153,23 @@ def test_build_moderation_log_payload_contains_snapshot_probability_and_action()
     )
 
     payload = build_moderation_log_payload(message, result, action_taken="deleted")
-    fields = {field.name.strip("_"): field.value for field in payload.embed.fields}
-    field_inline = {field.name.strip("_"): field.inline for field in payload.embed.fields}
 
-    assert payload.content == "\n".join(
-        [
-            "__**AutoMod Alert**__",
-            "",
-            "```ansi\n\u001b[1;31m[BLOCKED] Blocked message\u001b[0m\n```",
-            "",
-            "**[CHANNEL] Channel:** <#30>",
-        ]
-    )
-    assert payload.embed.title == "[BLOCKED] Blocked Message Snapshot"
-    assert "__**[MESSAGE] Message**__" in payload.embed.description
-    assert "------------------------------" not in payload.content
-    assert "------------------------------" not in payload.embed.description
-    assert "**Author:**" not in payload.embed.description
+    # Content is a single-line header like AutoMod.
+    assert payload.content == "**Scam Bot** has blocked a message in <#30>"
+
+    # Embed has no title (compact style).
+    assert payload.embed.title is None
+
+    # Embed has no separate fields — everything is in the description.
+    assert len(payload.embed.fields) == 0
+
+    # Description includes the author, quoted message, and metadata line.
+    assert "**Hav**" in payload.embed.description
     assert "Free PS5 giveaway" in payload.embed.description
-    assert "94.0% (0.940)" in fields["Probability Score"]
-    assert "**[SCORE]**" in fields["Probability Score"]
-    assert "**[RISK]** **Critical**" in fields["Risk Summary"]
-    assert "**Rule score:** 20" in fields["Risk Summary"]
-    assert "Mass Mention, High Value Item, DM Request" in fields["Risk Summary"]
-    assert "**[ACTION]** **Deleted message**" in fields["Action Taken"]
-    assert "**Reason:** Classifier Auto Delete Threshold" in fields["Action Taken"]
-    assert set(fields) == {"Probability Score", "Risk Summary", "Action Taken"}
-    assert field_inline == {
-        "Probability Score": False,
-        "Risk Summary": False,
-        "Action Taken": False,
-    }
+    assert "Mass Mention, High Value Item, DM Request" in payload.embed.description
+    assert "Rule: Classifier Auto Delete Threshold" in payload.embed.description
+    assert "Action: Blocked" in payload.embed.description
+
     assert payload.view is not None
 
 
@@ -216,9 +202,7 @@ async def test_critical_detection_deletes_logs_and_stores_pending_candidate(tmp_
     assert message.deleted
     assert mod_channel.messages
     log_kwargs = mod_channel.messages[0]["kwargs"]
-    assert log_kwargs["content"].startswith("__**AutoMod Alert**__")
-    assert "\u001b[1;31m[BLOCKED] Blocked message\u001b[0m" in log_kwargs["content"]
-    assert "__Action Taken__" in {field.name for field in log_kwargs["embed"].fields}
+    assert log_kwargs["content"] == "**Scam Bot** has blocked a message in <#30>"
     record = repository.list_records()[0]
     assert record.label is None
     assert record.label_source == "bot_flag"
