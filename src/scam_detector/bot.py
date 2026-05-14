@@ -17,6 +17,9 @@ from src.scam_detector.models import MessageContext
 from src.scam_detector.pipeline import DetectionPipeline, DetectionResult
 
 
+SECTION_DIVIDER = "------------------------------"
+
+
 @dataclass(frozen=True)
 class ModerationLogPayload:
     """Discord-ready payload for a moderator-facing detection snapshot."""
@@ -202,12 +205,12 @@ def build_moderation_log_payload(
     embed.add_field(
         name="__Probability Score__",
         value=_truncate_for_discord(_format_probability_score(result)),
-        inline=True,
+        inline=False,
     )
     embed.add_field(
         name="__Action Taken__",
         value=_truncate_for_discord(_format_action_taken(action_taken)),
-        inline=True,
+        inline=False,
     )
 
     message_id = getattr(message, "id", "unknown")
@@ -245,6 +248,7 @@ def _format_moderation_log_content(
         [
             "__**AutoMod Alert**__",
             _format_colored_status_line(action, action_taken),
+            SECTION_DIVIDER,
             f"**[CHANNEL] Channel:** {channel_label}",
         ]
     )
@@ -323,7 +327,9 @@ def _format_message_snapshot(message: discord.Message) -> str:
     return "\n\n".join(
         [
             "__**[MESSAGE] Message**__",
+            SECTION_DIVIDER,
             quoted_preview,
+            SECTION_DIVIDER,
         ]
     )
 
@@ -358,7 +364,12 @@ def _embed_color_for_result(result: DetectionResult, action_taken: str) -> disco
 
 
 def _format_probability_score(result: DetectionResult) -> str:
-    return f"**[SCORE]** **{_format_classifier_probability(result)}**"
+    return "\n".join(
+        [
+            SECTION_DIVIDER,
+            f"**[SCORE]** **{_format_classifier_probability(result)}**",
+        ]
+    )
 
 
 def _format_classifier_probability(result: DetectionResult) -> str:
@@ -369,7 +380,12 @@ def _format_classifier_probability(result: DetectionResult) -> str:
 
 
 def _format_action_taken(action_taken: str) -> str:
-    return f"**[ACTION]** **{_humanize_action_taken(action_taken)}**"
+    return "\n".join(
+        [
+            SECTION_DIVIDER,
+            f"**[ACTION]** **{_humanize_action_taken(action_taken)}**",
+        ]
+    )
 
 
 def _humanize_action_taken(action_taken: str) -> str:

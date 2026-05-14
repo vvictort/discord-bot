@@ -154,22 +154,28 @@ def test_build_moderation_log_payload_contains_snapshot_probability_and_action()
 
     payload = build_moderation_log_payload(message, result, action_taken="deleted")
     fields = {field.name.strip("_"): field.value for field in payload.embed.fields}
+    field_inline = {field.name.strip("_"): field.inline for field in payload.embed.fields}
 
     assert payload.content == "\n".join(
         [
             "__**AutoMod Alert**__",
             "```ansi\n\u001b[1;31m[BLOCKED] Blocked message\u001b[0m\n```",
+            "------------------------------",
             "**[CHANNEL] Channel:** <#30>",
         ]
     )
     assert payload.embed.title == "[BLOCKED] Blocked Message Snapshot"
     assert "__**[MESSAGE] Message**__" in payload.embed.description
+    assert "------------------------------" in payload.embed.description
     assert "**Author:**" not in payload.embed.description
     assert "Free PS5 giveaway" in payload.embed.description
     assert "94.0% (0.940)" in fields["Probability Score"]
     assert "**[SCORE]**" in fields["Probability Score"]
+    assert fields["Probability Score"].startswith("------------------------------")
     assert "**[ACTION]** **Deleted message**" in fields["Action Taken"]
+    assert fields["Action Taken"].startswith("------------------------------")
     assert set(fields) == {"Probability Score", "Action Taken"}
+    assert field_inline == {"Probability Score": False, "Action Taken": False}
     assert payload.view is not None
 
 
