@@ -177,17 +177,15 @@ def build_moderation_log_payload(
     """Build a Discord embed that reads like a compact moderation snapshot."""
 
     channel_label = _format_channel_reference(message.channel)
-    content = "\n".join(
-        [
-            "__**AutoMod Alert**__",
-            f"**Status:** {_format_event_summary(result.decision.action, action_taken)}",
-            f"**Channel:** {channel_label}",
-        ]
+    content = _format_moderation_log_content(
+        action=result.decision.action,
+        action_taken=action_taken,
+        channel_label=channel_label,
     )
     jump_url = getattr(message, "jump_url", None)
 
     embed = discord.Embed(
-        title=_format_snapshot_title(result.decision.action, action_taken),
+        title=_format_tagged_snapshot_title(result.decision.action, action_taken),
         description=_format_message_snapshot(message),
         url=jump_url,
         color=_embed_color_for_result(result, action_taken),
@@ -238,6 +236,58 @@ def _format_channel_reference(channel: object) -> str:
     return "unknown channel"
 
 
+def _format_moderation_log_content(
+    action: Decision,
+    action_taken: str,
+    channel_label: str,
+) -> str:
+    return "\n".join(
+        [
+            "__**AutoMod Alert**__",
+            _format_colored_status_line(action, action_taken),
+            f"**[CHANNEL] Channel:** {channel_label}",
+        ]
+    )
+
+
+def _format_colored_status_line(action: Decision, action_taken: str) -> str:
+    escape = "\u001b"
+    color = _ansi_color_for_status(action, action_taken)
+    status_tag = _format_status_tag(action, action_taken)
+    status_text = _format_event_summary(action, action_taken)
+    return f"```ansi\n{escape}[1;{color}m{status_tag} {status_text}{escape}[0m\n```"
+
+
+def _ansi_color_for_status(action: Decision, action_taken: str) -> int:
+    if action_taken == "deleted":
+        return 31
+    if action_taken in {"delete_failed", "delete_skipped"}:
+        return 33
+    if action == Decision.REVIEW:
+        return 33
+    if action == Decision.LOG:
+        return 36
+    if action == Decision.ALLOW:
+        return 32
+    return 37
+
+
+def _format_status_tag(action: Decision, action_taken: str) -> str:
+    if action_taken == "deleted":
+        return "[BLOCKED]"
+    if action_taken == "delete_failed":
+        return "[DELETE FAILED]"
+    if action_taken == "delete_skipped":
+        return "[DELETE SKIPPED]"
+    if action == Decision.REVIEW:
+        return "[REVIEW]"
+    if action == Decision.LOG:
+        return "[LOG]"
+    if action == Decision.DELETE:
+        return "[DELETE]"
+    return f"[{action.value.upper()}]"
+
+
 def _format_event_summary(action: Decision, action_taken: str) -> str:
     if action_taken == "deleted":
         return "Blocked message"
@@ -248,6 +298,12 @@ def _format_event_summary(action: Decision, action_taken: str) -> str:
     if action == Decision.DELETE:
         return "Flagged for deletion"
     return _humanize_label(action.value)
+
+
+def _format_tagged_snapshot_title(action: Decision, action_taken: str) -> str:
+    status_tag = _format_status_tag(action, action_taken)
+    snapshot_title = _format_snapshot_title(action, action_taken)
+    return f"{status_tag} {snapshot_title}"
 
 
 def _format_snapshot_title(action: Decision, action_taken: str) -> str:
@@ -266,7 +322,7 @@ def _format_message_snapshot(message: discord.Message) -> str:
     quoted_preview = "\n".join(f"> {line}" if line else ">" for line in preview.splitlines())
     return "\n\n".join(
         [
-            "__**Message**__",
+            "__**[MESSAGE] Message**__",
             quoted_preview,
         ]
     )
@@ -302,7 +358,7 @@ def _embed_color_for_result(result: DetectionResult, action_taken: str) -> disco
 
 
 def _format_probability_score(result: DetectionResult) -> str:
-    return f"**Score:** {_format_classifier_probability(result)}"
+    return f"**[SCORE]** **{_format_classifier_probability(result)}**"
 
 
 def _format_classifier_probability(result: DetectionResult) -> str:
@@ -313,7 +369,7 @@ def _format_classifier_probability(result: DetectionResult) -> str:
 
 
 def _format_action_taken(action_taken: str) -> str:
-    return f"**Action:** {_humanize_action_taken(action_taken)}"
+    return f"**[ACTION]** **{_humanize_action_taken(action_taken)}**"
 
 
 def _humanize_action_taken(action_taken: str) -> str:

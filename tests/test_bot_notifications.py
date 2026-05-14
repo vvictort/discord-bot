@@ -158,15 +158,17 @@ def test_build_moderation_log_payload_contains_snapshot_probability_and_action()
     assert payload.content == "\n".join(
         [
             "__**AutoMod Alert**__",
-            "**Status:** Blocked message",
-            "**Channel:** <#30>",
+            "```ansi\n\u001b[1;31m[BLOCKED] Blocked message\u001b[0m\n```",
+            "**[CHANNEL] Channel:** <#30>",
         ]
     )
-    assert "__**Message**__" in payload.embed.description
+    assert payload.embed.title == "[BLOCKED] Blocked Message Snapshot"
+    assert "__**[MESSAGE] Message**__" in payload.embed.description
     assert "**Author:**" not in payload.embed.description
     assert "Free PS5 giveaway" in payload.embed.description
     assert "94.0% (0.940)" in fields["Probability Score"]
-    assert "**Action:** Deleted message" in fields["Action Taken"]
+    assert "**[SCORE]**" in fields["Probability Score"]
+    assert "**[ACTION]** **Deleted message**" in fields["Action Taken"]
     assert set(fields) == {"Probability Score", "Action Taken"}
     assert payload.view is not None
 
@@ -201,7 +203,7 @@ async def test_critical_detection_deletes_logs_and_stores_pending_candidate(tmp_
     assert mod_channel.messages
     log_kwargs = mod_channel.messages[0]["kwargs"]
     assert log_kwargs["content"].startswith("__**AutoMod Alert**__")
-    assert "**Status:** Blocked message" in log_kwargs["content"]
+    assert "\u001b[1;31m[BLOCKED] Blocked message\u001b[0m" in log_kwargs["content"]
     assert "__Action Taken__" in {field.name for field in log_kwargs["embed"].fields}
     record = repository.list_records()[0]
     assert record.label is None
