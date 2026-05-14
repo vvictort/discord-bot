@@ -186,9 +186,9 @@ def build_moderation_log_payload(
     # Build a compact description: author line, quoted message, then metadata.
     author_name = _format_author_name(message.author)
     quoted = "\n".join(f"> {line}" if line else ">" for line in preview.splitlines())
-    metadata_line = _build_metadata_line(result, action_taken)
+    metadata_block = _build_metadata_block(result, action_taken)
 
-    description = f"**{author_name}**\n{quoted}\n{metadata_line}"
+    description = f"**{author_name}**\n{quoted}\n\n{metadata_block}"
 
     embed = discord.Embed(
         description=_truncate_for_discord(description, limit=4000),
@@ -224,22 +224,18 @@ def _action_verb(action: Decision, action_taken: str) -> str:
     return "has flagged a message"
 
 
-def _build_metadata_line(result: DetectionResult, action_taken: str) -> str:
-    """Build a single compact metadata line like: 'Signals: X, Y · Rule: Z · Risk: Critical'."""
-    parts: list[str] = []
+def _build_metadata_block(result: DetectionResult, action_taken: str) -> str:
+    """Build a compact metadata block with bold labels on separate lines."""
+    lines: list[str] = []
 
-    # Signals
     if result.rule_score and result.rule_score.reasons:
         signals = _format_key_signals(result.rule_score.reasons)
-        parts.append(f"Signals: {signals}")
+        lines.append(f"**Signals:** {signals}")
 
-    # Rule / reason
-    parts.append(f"Rule: {_humanize_label(result.decision.reason)}")
+    lines.append(f"**Rule:** {_humanize_label(result.decision.reason)}")
+    lines.append(f"**Action:** {_humanize_action_taken(action_taken)}")
 
-    # Action taken
-    parts.append(f"Action: {_humanize_action_taken(action_taken)}")
-
-    return " · ".join(parts)
+    return " · ".join(lines)
 
 
 def _format_optional_float(value: float | None) -> str:

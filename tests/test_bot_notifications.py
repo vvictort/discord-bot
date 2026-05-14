@@ -166,9 +166,9 @@ def test_build_moderation_log_payload_contains_compact_automod_style_alert() -> 
     # Description includes the author, quoted message, and metadata line.
     assert "**Hav**" in payload.embed.description
     assert "Free PS5 giveaway" in payload.embed.description
-    assert "Mass Mention, High Value Item, DM Request" in payload.embed.description
-    assert "Rule: Classifier Auto Delete Threshold" in payload.embed.description
-    assert "Action: Blocked" in payload.embed.description
+    assert "**Signals:** Mass Mention, High Value Item, DM Request" in payload.embed.description
+    assert "**Rule:** Classifier Auto Delete Threshold" in payload.embed.description
+    assert "**Action:** Blocked" in payload.embed.description
 
     assert payload.view is not None
 
