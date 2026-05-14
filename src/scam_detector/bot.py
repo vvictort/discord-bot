@@ -177,8 +177,13 @@ def build_moderation_log_payload(
     """Build a Discord embed that reads like a compact moderation snapshot."""
 
     channel_label = _format_channel_reference(message.channel)
-    event_verb = _format_event_verb(result.decision.action, action_taken)
-    content = f"**AutoMod** has {event_verb} a message in {channel_label}"
+    content = "\n".join(
+        [
+            "__**AutoMod Alert**__",
+            f"**Status:** {_format_event_summary(result.decision.action, action_taken)}",
+            f"**Channel:** {channel_label}",
+        ]
+    )
     jump_url = getattr(message, "jump_url", None)
 
     embed = discord.Embed(
@@ -197,27 +202,27 @@ def build_moderation_log_payload(
         embed.set_author(name=author_name)
 
     embed.add_field(
-        name="Probability Score",
+        name="__Probability Score__",
         value=_truncate_for_discord(_format_probability_score(result)),
         inline=True,
     )
     embed.add_field(
-        name="Risk",
+        name="__Risk__",
         value=_truncate_for_discord(_format_risk_summary(result)),
         inline=True,
     )
     embed.add_field(
-        name="Actions Taken",
+        name="__Actions Taken__",
         value=_truncate_for_discord(_format_actions_taken(result, action_taken)),
         inline=False,
     )
     embed.add_field(
-        name="Reasoning",
+        name="__Reasoning__",
         value=_truncate_for_discord(_format_reasoning(result)),
         inline=False,
     )
     embed.add_field(
-        name="Detection Trace",
+        name="__Detection Trace__",
         value=_truncate_for_discord(_format_detection_trace(result)),
         inline=False,
     )
@@ -248,16 +253,16 @@ def _format_channel_reference(channel: object) -> str:
     return "unknown channel"
 
 
-def _format_event_verb(action: Decision, action_taken: str) -> str:
+def _format_event_summary(action: Decision, action_taken: str) -> str:
     if action_taken == "deleted":
-        return "blocked"
+        return "Blocked message"
     if action == Decision.REVIEW:
-        return "flagged for review"
+        return "Flagged for moderator review"
     if action == Decision.LOG:
-        return "logged"
+        return "Logged message"
     if action == Decision.DELETE:
-        return "flagged"
-    return action.value
+        return "Flagged for deletion"
+    return _humanize_label(action.value)
 
 
 def _format_snapshot_title(action: Decision, action_taken: str) -> str:
@@ -275,7 +280,13 @@ def _format_message_snapshot(message: discord.Message) -> str:
     preview = (message.content or "").strip() or "[empty message]"
     preview = _truncate_for_discord(preview, limit=1600)
     quoted_preview = "\n".join(f"> {line}" if line else ">" for line in preview.splitlines())
-    return f"**{author_name}**\n{quoted_preview}"
+    return "\n\n".join(
+        [
+            "__**Message Snapshot**__",
+            f"**Author:** {author_name}",
+            quoted_preview,
+        ]
+    )
 
 
 def _format_author_name(author: object) -> str:
@@ -310,10 +321,10 @@ def _embed_color_for_result(result: DetectionResult, action_taken: str) -> disco
 def _format_probability_score(result: DetectionResult) -> str:
     classifier = _format_classifier_probability(result)
     embedding = _format_embedding_similarity(result)
-    return "\n".join(
+    return _format_markdown_pairs(
         [
-            f"Classifier: {classifier}",
-            f"Embedding: {embedding}",
+            ("Classifier", classifier),
+            ("Embedding", embedding),
         ]
     )
 
@@ -325,7 +336,7 @@ def _format_classifier_probability(result: DetectionResult) -> str:
     if result.classifier_called:
         return "no score returned"
     if result.classifier_skip_reason:
-        return f"not evaluated ({result.classifier_skip_reason})"
+        return f"not evaluated (`{result.classifier_skip_reason}`)"
     return "not evaluated"
 
 
@@ -333,33 +344,33 @@ def _format_embedding_similarity(result: DetectionResult) -> str:
     if result.embedding_similarity is not None:
         label = f"{result.embedding_similarity:.3f}"
         if result.embedding_matched_category:
-            return f"{label} ({result.embedding_matched_category})"
+            return f"{label} (`{result.embedding_matched_category}`)"
         return label
     if result.embedding_called:
         return "no score returned"
     if result.embedding_skip_reason:
-        return f"not evaluated ({result.embedding_skip_reason})"
+        return f"not evaluated (`{result.embedding_skip_reason}`)"
     return "not evaluated"
 
 
 def _format_risk_summary(result: DetectionResult) -> str:
     final_score = result.rule_score.score if result.rule_score else 0
     rule_level = result.rule_score.level.value if result.rule_score else "none"
-    return "\n".join(
+    return _format_markdown_pairs(
         [
-            f"Rule score: {final_score}",
-            f"Rule level: {rule_level}",
-            f"Band: {result.decision.band.value}",
+            ("Rule score", str(final_score)),
+            ("Rule level", _format_code_value(rule_level)),
+            ("Band", _format_code_value(result.decision.band.value)),
         ]
     )
 
 
 def _format_actions_taken(result: DetectionResult, action_taken: str) -> str:
-    return "\n".join(
+    return _format_markdown_pairs(
         [
-            f"Decision: {_humanize_label(result.decision.action.value)}",
-            f"Outcome: {_humanize_action_taken(action_taken)}",
-            f"Reason: {result.decision.reason}",
+            ("Decision", _humanize_label(result.decision.action.value)),
+            ("Outcome", _humanize_action_taken(action_taken)),
+            ("Reason", _format_code_value(result.decision.reason)),
         ]
     )
 
@@ -378,11 +389,11 @@ def _humanize_action_taken(action_taken: str) -> str:
 
 def _format_reasoning(result: DetectionResult) -> str:
     rule_reasons = result.rule_score.reasons if result.rule_score else []
-    return "\n".join(
+    return _format_markdown_pairs(
         [
-            f"Decision reason: {result.decision.reason}",
-            f"Screening: {_format_reason_list(result.screening.reasons)}",
-            f"Rules: {_format_reason_list(rule_reasons)}",
+            ("Decision reason", _format_code_value(result.decision.reason)),
+            ("Screening", _format_reason_list(result.screening.reasons)),
+            ("Rules", _format_reason_list(rule_reasons)),
         ]
     )
 
@@ -390,17 +401,36 @@ def _format_reasoning(result: DetectionResult) -> str:
 def _format_detection_trace(result: DetectionResult) -> str:
     classifier_status = "called" if result.classifier_called else "skipped"
     embedding_status = "called" if result.embedding_called else "skipped"
-    return "\n".join(
+    return _format_markdown_pairs(
         [
-            f"Classifier: {classifier_status}; {result.classifier_skip_reason or 'score available'}",
-            f"Embedding: {embedding_status}; {result.embedding_skip_reason or 'score available'}",
-            f"Embedding match: {result.embedding_matched_category or 'none'}",
+            (
+                "Classifier",
+                _format_trace_status(classifier_status, result.classifier_skip_reason),
+            ),
+            (
+                "Embedding",
+                _format_trace_status(embedding_status, result.embedding_skip_reason),
+            ),
+            ("Embedding match", _format_code_value(result.embedding_matched_category)),
         ]
     )
 
 
+def _format_trace_status(status: str, skip_reason: str | None) -> str:
+    detail = _format_code_value(skip_reason) if skip_reason else "score available"
+    return f"{status} ({detail})"
+
+
 def _format_reason_list(reasons: list[str]) -> str:
-    return ", ".join(reasons) if reasons else "none"
+    return ", ".join(_format_code_value(reason) for reason in reasons) if reasons else "none"
+
+
+def _format_markdown_pairs(pairs: list[tuple[str, str]]) -> str:
+    return "\n\n".join(f"**{label}:** {value}" for label, value in pairs)
+
+
+def _format_code_value(value: str | None) -> str:
+    return f"`{value}`" if value else "none"
 
 
 def _humanize_label(value: str) -> str:
