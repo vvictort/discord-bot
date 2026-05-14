@@ -18,6 +18,21 @@ The project is built around a cheap-first detection pipeline:
 6. Decide whether to allow, log, send to review, or delete.
 7. Store moderator-confirmed labels for future training.
 
+## Design overview
+
+```mermaid
+flowchart LR
+    chat[Discord messages] --> bot[Scam bot]
+    bot --> screen[Cheap screening and rules]
+    screen --> decision{Decision}
+    decision -->|Low risk| allow[Allow message]
+    decision -->|Review or delete| alerts[Mod alert channel]
+    alerts --> feedback[Pending review data]
+    reports[Member reports missed message] --> feedback
+    feedback --> labels[Moderator confirms labels]
+    labels --> training[Future training data]
+```
+
 ## Tech stack
 
 - Python 3.10+ with modern type hints and dataclasses.
