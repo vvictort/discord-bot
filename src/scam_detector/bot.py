@@ -380,7 +380,7 @@ class ScamDetectionBot(discord.Client):
         self.feedback_repository = feedback_repository or self._build_feedback_repository()
         self.pipeline = pipeline or self._build_default_pipeline()
         self.tree = app_commands.CommandTree(self)
-        self._register_config_commands()
+        self._register_admin_commands()
 
     async def setup_hook(self) -> None:
         # Guild-scoped sync makes slash commands appear immediately in a test server.
@@ -532,81 +532,127 @@ class ScamDetectionBot(discord.Client):
             whitelisted_role_ids=self.settings.whitelisted_role_ids,
         )
 
-    def _register_config_commands(self) -> None:
+    def _register_admin_commands(self) -> None:
         # These commands intentionally use the in-memory store for now. The command
         # handlers should not care whether persistence is memory, SQLite, or remote.
-        config_group = app_commands.Group(
-            name="scam-config",
-            description="Configure scam detection for this server.",
-            guild_only=True,
-        )
-        whitelist_group = app_commands.Group(
-            name="whitelist-role",
-            description="Manage roles that bypass scam detection.",
+        scam_group = app_commands.Group(
+            name="scam",
+            description="Manage scam protection for this server.",
             guild_only=True,
         )
 
-        @config_group.command(name="review-channel", description="Set the channel for scam detection alerts.")
+        @scam_group.command(name="setup", description="Choose where scam alerts should be sent.")
         @app_commands.checks.has_permissions(manage_guild=True)
-        async def review_channel(
+        async def setup(
             interaction: discord.Interaction,
             channel: discord.TextChannel,
         ) -> None:
             guild_id = _require_interaction_guild_id(interaction)
             self.config_store.set_review_channel(guild_id, channel.id)
             await interaction.response.send_message(
-                f"Scam detection alerts will be sent to {channel.mention}.",
+                f"Done. Scam alerts will be sent to {channel.mention}.",
                 ephemeral=True,
             )
 
-        @config_group.command(name="delete-enabled", description="Enable or disable automatic deletion.")
+        @scam_group.command(name="mode", description="Choose whether the bot can delete critical scams.")
+        @app_commands.choices(
+            mode=[
+                app_commands.Choice(
+                    name="Protect - alert and delete critical scams",
+                    value="protect",
+                ),
+                app_commands.Choice(
+                    name="Monitor - alerts only, no deletes",
+                    value="monitor",
+                ),
+            ]
+        )
         @app_commands.checks.has_permissions(manage_guild=True)
-        async def delete_enabled(interaction: discord.Interaction, enabled: bool) -> None:
+        async def mode(
+            interaction: discord.Interaction,
+            mode: app_commands.Choice[str],
+        ) -> None:
             guild_id = _require_interaction_guild_id(interaction)
-            self.config_store.set_delete_enabled(guild_id, enabled)
-            state = "enabled" if enabled else "disabled"
+            delete_enabled = mode.value == "protect"
+            self.config_store.set_delete_enabled(guild_id, delete_enabled)
             await interaction.response.send_message(
-                f"Automatic deletion is now {state}.",
+                _format_mode_response(delete_enabled),
                 ephemeral=True,
             )
 
-        @whitelist_group.command(name="add", description="Add a trusted role that bypasses scam detection.")
+        @scam_group.command(name="status", description="Show the current scam protection setup.")
         @app_commands.checks.has_permissions(manage_guild=True)
-        async def whitelist_add(interaction: discord.Interaction, role: discord.Role) -> None:
+        async def status(interaction: discord.Interaction) -> None:
+            guild_id = _require_interaction_guild_id(interaction)
+            config = self.config_store.get_config(guild_id)
+            await interaction.response.send_message(
+                _format_config_status(config),
+                ephemeral=True,
+            )
+
+        @scam_group.command(name="trust", description="Let a trusted role bypass scam detection.")
+        @app_commands.checks.has_permissions(manage_guild=True)
+        async def trust(interaction: discord.Interaction, role: discord.Role) -> None:
             guild_id = _require_interaction_guild_id(interaction)
             self.config_store.add_whitelisted_role(guild_id, role.id)
             await interaction.response.send_message(
-                f"{role.mention} now bypasses scam detection.",
+                f"Trusted role added: {role.mention}. Members with this role bypass scam checks.",
                 ephemeral=True,
             )
 
-        @whitelist_group.command(name="remove", description="Remove a trusted role from the bypass list.")
+        @scam_group.command(name="untrust", description="Remove a trusted role from the bypass list.")
         @app_commands.checks.has_permissions(manage_guild=True)
-        async def whitelist_remove(interaction: discord.Interaction, role: discord.Role) -> None:
+        async def untrust(interaction: discord.Interaction, role: discord.Role) -> None:
             guild_id = _require_interaction_guild_id(interaction)
             self.config_store.remove_whitelisted_role(guild_id, role.id)
             await interaction.response.send_message(
-                f"{role.mention} no longer bypasses scam detection.",
+                f"Trusted role removed: {role.mention}.",
                 ephemeral=True,
             )
 
-        @whitelist_group.command(name="list", description="List roles that bypass scam detection.")
-        @app_commands.checks.has_permissions(manage_guild=True)
-        async def whitelist_list(interaction: discord.Interaction) -> None:
-            guild_id = _require_interaction_guild_id(interaction)
-            role_mentions = [
-                f"<@&{role_id}>"
-                for role_id in self.config_store.list_whitelisted_roles(guild_id)
-            ]
-            message = (
-                "Whitelisted roles: " + ", ".join(role_mentions)
-                if role_mentions
-                else "No whitelisted roles are configured."
-            )
-            await interaction.response.send_message(message, ephemeral=True)
+        self.tree.add_command(scam_group)
 
-        config_group.add_command(whitelist_group)
-        self.tree.add_command(config_group)
+
+def _format_mode_response(delete_enabled: bool) -> str:
+    if delete_enabled:
+        return (
+            "**Mode:** Protect\n"
+            "Critical scam messages can be deleted when the bot has Manage Messages permission."
+        )
+    return (
+        "**Mode:** Monitor\n"
+        "The bot will alert moderators but will not delete messages."
+    )
+
+
+def _format_config_status(config: GuildConfig) -> str:
+    alert_channel = (
+        f"<#{config.mod_review_channel_id}>"
+        if config.mod_review_channel_id is not None
+        else "Not set"
+    )
+    trusted_roles = _format_trusted_roles(config.whitelisted_role_ids)
+
+    return "\n".join(
+        [
+            "__**Scam Bot Status**__",
+            f"**Alerts:** {alert_channel}",
+            f"**Mode:** {_format_mode_label(config.delete_enabled)}",
+            f"**Trusted roles:** {trusted_roles}",
+        ]
+    )
+
+
+def _format_mode_label(delete_enabled: bool) -> str:
+    if delete_enabled:
+        return "Protect (critical scams can be deleted)"
+    return "Monitor (alerts only)"
+
+
+def _format_trusted_roles(role_ids: frozenset[int]) -> str:
+    if not role_ids:
+        return "None"
+    return ", ".join(f"<@&{role_id}>" for role_id in sorted(role_ids))
 
 
 def _require_interaction_guild_id(interaction: discord.Interaction) -> int:

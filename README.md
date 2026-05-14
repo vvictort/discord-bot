@@ -1,7 +1,12 @@
 # Discord Scam Detection Bot
 
-Python 3 Discord moderation bot for tiered scam detection, moderator review,
-and feedback-driven classifier training.
+Python 3 Discord moderation bot focused on the core server-admin workflow:
+
+- Watch chat for common scam and giveaway patterns.
+- Send compact alerts to a moderator channel.
+- Run in `Monitor` mode or `Protect` mode.
+- Let admins trust staff roles that should bypass checks.
+- Store moderator review candidates for future training.
 
 The project is built around a cheap-first detection pipeline:
 
@@ -204,22 +209,16 @@ The Hugging Face dataset is only a bootstrap seed. The long-term training set sh
 
 Never train on the model's own predictions as ground truth. Only train on imported labeled data or human-confirmed labels.
 
-## Bot configuration
+## Run the bot
 
-Create a local `.env` file:
+Create a local `.env` file with the core settings:
 
 ```bash
 DISCORD_TOKEN=your-token-here
 MOD_REVIEW_CHANNEL_ID=your-mod-review-channel-id
 WHITELISTED_ROLE_IDS=admin-role-id,moderator-role-id
 COMMAND_SYNC_GUILD_ID=your-private-server-id
-EMBEDDING_SIMILARITY_ENABLED=false
-# SCAM_TEMPLATE_PATH=optional/path/to/templates.json
-AUTO_DELETE_CRITICAL=true
-AUTO_DELETE_HIGH=false
-CRITICAL_RULE_SCORE_THRESHOLD=16
-HIGH_RULE_SCORE_THRESHOLD=8
-MOD_REVIEW_THRESHOLD=0.75
+BOT_DELETE_ENABLED=true
 FEEDBACK_DB_PATH=data/feedback.sqlite
 ```
 
@@ -229,13 +228,40 @@ Run the bot:
 python -m src.scam_detector.bot
 ```
 
-Optional bot settings:
+For a private server, also check Discord setup:
 
-- `MOD_REVIEW_CHANNEL_ID`: channel where log/review/delete events are posted.
-- `WHITELISTED_ROLE_IDS`: comma-separated default role IDs that bypass scam detection.
-- `BOT_DELETE_ENABLED=false`: dry-run mode; detections are reported but messages are not deleted.
+1. In the Discord Developer Portal, enable the bot's privileged **Message Content Intent**.
+2. Invite the bot with permissions to view channels, read message history, send messages, and manage messages if you want auto-delete.
+3. Put `MOD_REVIEW_CHANNEL_ID` in `.env` or run `/scam setup #mod-alerts` so suspicious messages are visible.
+4. Add trusted admin/mod roles with `WHITELISTED_ROLE_IDS` or `/scam trust @Admin`.
+5. Restart the bot after changing `.env` or Developer Portal settings.
+
+The bot has two admin-facing modes:
+
+- `Monitor`: alert moderators, but do not delete messages.
+- `Protect`: alert moderators and allow critical scam messages to be deleted when permissions allow it.
+
+Critical rule-only confidence can delete immediately when `AUTO_DELETE_CRITICAL=true`. High rule confidence deletes only when `AUTO_DELETE_HIGH=true`.
+
+## Discord commands
+
+Admins with **Manage Server** can configure the bot in Discord:
+
+```text
+/scam setup #mod-alerts
+/scam mode protect
+/scam mode monitor
+/scam status
+/scam trust @Admin
+/scam untrust @Admin
+```
+
+These command settings are currently stored in memory and reset when the bot restarts. The `.env` values still act as startup defaults.
+
+Advanced optional settings:
+
+- `BOT_DELETE_ENABLED=false`: start in Monitor mode so detections are reported but not deleted.
 - `BOT_NOTIFY_LOG_ACTIONS=false`: only review/delete events go to the mod channel.
-- `COMMAND_SYNC_GUILD_ID`: sync slash commands to one server immediately during testing.
 - `EMBEDDING_SIMILARITY_ENABLED=true`: enable optional known-template similarity for medium/uncertain suspicious messages.
 - `SCAM_TEMPLATE_PATH`: optional JSON template file. If omitted, anonymized local giveaway templates are used.
 - `AUTO_DELETE_CRITICAL`: delete critical rule detections immediately when possible.
@@ -243,34 +269,7 @@ Optional bot settings:
 - `CRITICAL_RULE_SCORE_THRESHOLD`: rule score needed for the critical action band.
 - `HIGH_RULE_SCORE_THRESHOLD`: rule score needed for the high action band.
 - `MOD_REVIEW_THRESHOLD`: classifier probability threshold for mod review.
-- `FEEDBACK_DB_PATH`: SQLite path for pending candidates and moderator-confirmed labels.
 
-For a private server, also check Discord configuration:
-
-1. In the Discord Developer Portal, enable the bot's privileged **Message Content Intent**.
-2. Invite the bot with permissions to view channels, read message history, send messages, and manage messages if you want auto-delete.
-3. Put `MOD_REVIEW_CHANNEL_ID` in `.env` while testing so suspicious messages are visible even when they are not deleted.
-4. Add trusted admin/mod roles to `WHITELISTED_ROLE_IDS` so their messages bypass detection.
-5. Restart the bot after changing `.env` or Developer Portal settings.
-
-Medium confidence becomes `review`. Critical rule-only confidence can delete immediately when `AUTO_DELETE_CRITICAL=true`. High rule confidence deletes only when `AUTO_DELETE_HIGH=true`.
-
-Embedding similarity is disabled by default. If enabled, missing template files or optional embedding backends fail closed: the bot logs the unavailable layer and continues with rule/classifier behavior.
-
-To copy a role ID, enable Discord Developer Mode, open **Server Settings > Roles**, right-click the role, and choose **Copy Role ID**. Avoid whitelisting `@everyone`, because that bypasses detection for the whole server.
-
-## Server configuration commands
-
-Admins with **Manage Server** can configure the bot in Discord:
-
-```text
-/scam-config review-channel #mod-alerts
-/scam-config delete-enabled false
-/scam-config whitelist-role add @Admin
-/scam-config whitelist-role remove @Admin
-/scam-config whitelist-role list
-```
-
-These command settings are currently stored in memory and reset when the bot restarts. The `.env` values still act as startup defaults. Persistent per-server storage is the next step.
+To copy a role ID, enable Discord Developer Mode, open **Server Settings > Roles**, right-click the role, and choose **Copy Role ID**. Avoid trusting `@everyone`, because that bypasses detection for the whole server.
 
 For local testing, set `COMMAND_SYNC_GUILD_ID` to your server ID. Without it, commands are synced globally and may take longer to appear in Discord.

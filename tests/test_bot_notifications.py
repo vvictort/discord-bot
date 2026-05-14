@@ -91,14 +91,15 @@ def test_build_default_guild_config_from_env_settings() -> None:
     assert config.whitelisted_role_ids == frozenset({2})
 
 
-def test_bot_registers_scam_config_command_group() -> None:
+def test_bot_registers_core_scam_command_group() -> None:
     bot = ScamDetectionBot(settings=BotSettings())
 
     commands = {command.name: command for command in bot.tree.get_commands()}
 
-    assert "scam-config" in commands
-    subcommands = {command.name for command in commands["scam-config"].commands}
-    assert {"review-channel", "delete-enabled", "whitelist-role"}.issubset(subcommands)
+    assert "scam" in commands
+    assert "scam-config" not in commands
+    subcommands = {command.name for command in commands["scam"].commands}
+    assert subcommands == {"setup", "mode", "status", "trust", "untrust"}
 
 
 class FakeAuthor:
