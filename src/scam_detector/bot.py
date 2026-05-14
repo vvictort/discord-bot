@@ -211,6 +211,8 @@ def build_moderation_log_payload(
 
 def _action_verb(action: Decision, action_taken: str) -> str:
     """Return a past-tense phrase describing what happened (e.g. 'has blocked a message')."""
+    if action_taken == "reported":
+        return "has received a user report"
     if action_taken == "deleted":
         return "has blocked a message"
     if action_taken == "delete_failed":
@@ -299,6 +301,7 @@ def _humanize_action_taken(action_taken: str) -> str:
         "review": "Flagged for review",
         "log": "Logged",
         "allow": "Allowed",
+        "reported": "Reported by user",
     }
     return labels.get(action_taken, _humanize_label(action_taken))
 
@@ -381,6 +384,7 @@ class ScamDetectionBot(discord.Client):
         self.pipeline = pipeline or self._build_default_pipeline()
         self.tree = app_commands.CommandTree(self)
         self._register_admin_commands()
+        self._register_report_command()
 
     async def setup_hook(self) -> None:
         # Guild-scoped sync makes slash commands appear immediately in a test server.
@@ -513,6 +517,58 @@ class ScamDetectionBot(discord.Client):
             action_taken=action_taken,
         )
 
+    async def _handle_reported_message(
+        self,
+        interaction: discord.Interaction,
+        message: discord.Message,
+    ) -> None:
+        guild_id = _require_interaction_guild_id(interaction)
+        if message.guild is None or message.guild.id != guild_id:
+            await interaction.response.send_message(
+                "This report can only be used for messages in this server.",
+                ephemeral=True,
+            )
+            return
+
+        if self.feedback_repository is None:
+            await interaction.response.send_message(
+                "Reports are not available because feedback storage is disabled.",
+                ephemeral=True,
+            )
+            return
+
+        text = (message.content or "").strip()
+        if not text:
+            await interaction.response.send_message(
+                "This message has no text content to review.",
+                ephemeral=True,
+            )
+            return
+
+        guild_config = self.config_store.get_config(guild_id)
+        self.feedback_repository.add_user_report(
+            message_id=message.id,
+            guild_id=guild_id,
+            channel_id=message.channel.id,
+            reporter_id=interaction.user.id,
+            text=text,
+            reason="user_report",
+        )
+
+        result = self.pipeline.detect(
+            build_message_context(message),
+            whitelisted_role_ids=guild_config.whitelisted_role_ids,
+            decision_thresholds=build_decision_thresholds(guild_config),
+            user_report_count=1,
+        )
+        payload = build_moderation_log_payload(message, result, action_taken="reported")
+        await self._notify_moderators_if_needed(payload, Decision.REVIEW, guild_config)
+
+        await interaction.response.send_message(
+            "Report received. A moderator can review it from the alert channel.",
+            ephemeral=True,
+        )
+
     def _build_feedback_repository(self) -> FeedbackRepository | None:
         if self.settings.feedback_database_path is None:
             return None
@@ -611,6 +667,20 @@ class ScamDetectionBot(discord.Client):
             )
 
         self.tree.add_command(scam_group)
+
+    def _register_report_command(self) -> None:
+        async def report_message(
+            interaction: discord.Interaction,
+            message: discord.Message,
+        ) -> None:
+            await self._handle_reported_message(interaction, message)
+
+        self.tree.add_command(
+            app_commands.ContextMenu(
+                name="Report scam",
+                callback=report_message,
+            )
+        )
 
 
 def _format_mode_response(delete_enabled: bool) -> str:

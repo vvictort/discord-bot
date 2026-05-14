@@ -1,4 +1,5 @@
 import pytest
+import discord
 
 from src.scam_detector.bot import (
     BotSettings,
@@ -100,11 +101,14 @@ def test_bot_registers_core_scam_command_group() -> None:
     assert "scam-config" not in commands
     subcommands = {command.name for command in commands["scam"].commands}
     assert subcommands == {"setup", "mode", "status", "trust", "untrust"}
+    assert isinstance(commands["Report scam"], discord.app_commands.ContextMenu)
 
 
 class FakeAuthor:
     id = 10
     display_name = "Hav"
+    bot = False
+    created_at = discord.utils.utcnow()
 
 
 class FakeGuild:
@@ -123,6 +127,8 @@ class FakeMessage:
         self.author = FakeAuthor()
         self.guild = FakeGuild()
         self.channel = FakeChannel()
+        self.mentions: list[object] = []
+        self.mention_everyone = False
         self.deleted = False
         self.jump_url = "https://discord.com/channels/20/30/123"
 
@@ -136,6 +142,22 @@ class FakeModChannel:
 
     async def send(self, *args: object, **kwargs: object) -> None:
         self.messages.append({"args": args, "kwargs": kwargs})
+
+
+class FakeResponse:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, object]] = []
+
+    async def send_message(self, content: str, **kwargs: object) -> None:
+        self.messages.append({"content": content, "kwargs": kwargs})
+
+
+class FakeInteraction:
+    guild_id = 20
+    user = type("FakeReporter", (), {"id": 99})()
+
+    def __init__(self) -> None:
+        self.response = FakeResponse()
 
 
 def test_build_moderation_log_payload_contains_compact_automod_style_alert() -> None:
@@ -179,7 +201,7 @@ async def test_critical_detection_deletes_logs_and_stores_pending_candidate(tmp_
     repository = FeedbackRepository(tmp_path / "feedback.sqlite")
     repository.initialize()
     bot = ScamDetectionBot(
-        settings=BotSettings(),
+        settings=BotSettings(mod_review_channel_id=999),
         feedback_repository=repository,
     )
     mod_channel = FakeModChannel()
@@ -210,3 +232,41 @@ async def test_critical_detection_deletes_logs_and_stores_pending_candidate(tmp_
     assert record.review_status == "pending"
     assert record.needs_review
     assert record.action_taken == "deleted"
+
+
+@pytest.mark.asyncio
+async def test_user_reported_unflagged_message_is_stored_and_sent_to_review(tmp_path) -> None:
+    repository = FeedbackRepository(tmp_path / "feedback.sqlite")
+    repository.initialize()
+    bot = ScamDetectionBot(
+        settings=BotSettings(mod_review_channel_id=999),
+        feedback_repository=repository,
+    )
+    mod_channel = FakeModChannel()
+    bot.get_channel = lambda channel_id: mod_channel
+    interaction = FakeInteraction()
+    message = FakeMessage("Can someone verify this message for me?")
+
+    await bot._handle_reported_message(
+        interaction=interaction,
+        message=message,
+    )
+
+    response = interaction.response.messages[0]
+    assert response["content"] == "Report received. A moderator can review it from the alert channel."
+    assert response["kwargs"] == {"ephemeral": True}
+    assert mod_channel.messages
+    log_kwargs = mod_channel.messages[0]["kwargs"]
+    assert log_kwargs["content"] == "**Scam Bot** has received a user report in <#30>"
+    assert "**Rule:** User Report Review Priority" in log_kwargs["embed"].description
+    assert "**Action:** Reported by user" in log_kwargs["embed"].description
+
+    record = repository.list_records()[0]
+    assert record.message_id == 123
+    assert record.label is None
+    assert record.label_source == "user_report"
+    assert record.review_status == "pending"
+    assert record.needs_review
+    assert record.action_taken == "reported"
+    assert record.report_count == 1
+    assert record.review_priority == 1

@@ -101,7 +101,7 @@ Moderator outcomes determine training eligibility:
 - False Positive: `label = not_scam`, `label_source = moderator_confirmed`
 - Ignore: `review_status = ignored`
 
-User reports are weak signals. They increase review priority, but they do not directly delete messages and do not become training labels.
+User reports are weak signals. They increase review priority, but they do not directly delete messages and do not become training labels. Server members can report an unflagged message from Discord's message app menu with **Apps > Report scam**. The bot stores that message as a pending `user_report` review item and sends it to the mod alert channel.
 
 ## Dataset preparation
 
@@ -254,6 +254,12 @@ Admins with **Manage Server** can configure the bot in Discord:
 /scam status
 /scam trust @Admin
 /scam untrust @Admin
+```
+
+Server members can report missed messages from Discord's message app menu:
+
+```text
+Right-click message > Apps > Report scam
 ```
 
 These command settings are currently stored in memory and reset when the bot restarts. The `.env` values still act as startup defaults.
