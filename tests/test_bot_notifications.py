@@ -159,23 +159,31 @@ def test_build_moderation_log_payload_contains_snapshot_probability_and_action()
     assert payload.content == "\n".join(
         [
             "__**AutoMod Alert**__",
+            "",
             "```ansi\n\u001b[1;31m[BLOCKED] Blocked message\u001b[0m\n```",
-            "------------------------------",
+            "",
             "**[CHANNEL] Channel:** <#30>",
         ]
     )
     assert payload.embed.title == "[BLOCKED] Blocked Message Snapshot"
     assert "__**[MESSAGE] Message**__" in payload.embed.description
-    assert "------------------------------" in payload.embed.description
+    assert "------------------------------" not in payload.content
+    assert "------------------------------" not in payload.embed.description
     assert "**Author:**" not in payload.embed.description
     assert "Free PS5 giveaway" in payload.embed.description
     assert "94.0% (0.940)" in fields["Probability Score"]
     assert "**[SCORE]**" in fields["Probability Score"]
-    assert fields["Probability Score"].startswith("------------------------------")
+    assert "**[RISK]** **Critical**" in fields["Risk Summary"]
+    assert "**Rule score:** 20" in fields["Risk Summary"]
+    assert "Mass Mention, High Value Item, DM Request" in fields["Risk Summary"]
     assert "**[ACTION]** **Deleted message**" in fields["Action Taken"]
-    assert fields["Action Taken"].startswith("------------------------------")
-    assert set(fields) == {"Probability Score", "Action Taken"}
-    assert field_inline == {"Probability Score": False, "Action Taken": False}
+    assert "**Reason:** Classifier Auto Delete Threshold" in fields["Action Taken"]
+    assert set(fields) == {"Probability Score", "Risk Summary", "Action Taken"}
+    assert field_inline == {
+        "Probability Score": False,
+        "Risk Summary": False,
+        "Action Taken": False,
+    }
     assert payload.view is not None
 
 

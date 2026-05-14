@@ -17,9 +17,6 @@ from src.scam_detector.models import MessageContext
 from src.scam_detector.pipeline import DetectionPipeline, DetectionResult
 
 
-SECTION_DIVIDER = "------------------------------"
-
-
 @dataclass(frozen=True)
 class ModerationLogPayload:
     """Discord-ready payload for a moderator-facing detection snapshot."""
@@ -208,8 +205,13 @@ def build_moderation_log_payload(
         inline=False,
     )
     embed.add_field(
+        name="__Risk Summary__",
+        value=_truncate_for_discord(_format_risk_summary(result)),
+        inline=False,
+    )
+    embed.add_field(
         name="__Action Taken__",
-        value=_truncate_for_discord(_format_action_taken(action_taken)),
+        value=_truncate_for_discord(_format_action_taken(result, action_taken)),
         inline=False,
     )
 
@@ -247,8 +249,9 @@ def _format_moderation_log_content(
     return "\n".join(
         [
             "__**AutoMod Alert**__",
+            "",
             _format_colored_status_line(action, action_taken),
-            SECTION_DIVIDER,
+            "",
             f"**[CHANNEL] Channel:** {channel_label}",
         ]
     )
@@ -327,9 +330,7 @@ def _format_message_snapshot(message: discord.Message) -> str:
     return "\n\n".join(
         [
             "__**[MESSAGE] Message**__",
-            SECTION_DIVIDER,
             quoted_preview,
-            SECTION_DIVIDER,
         ]
     )
 
@@ -364,12 +365,7 @@ def _embed_color_for_result(result: DetectionResult, action_taken: str) -> disco
 
 
 def _format_probability_score(result: DetectionResult) -> str:
-    return "\n".join(
-        [
-            SECTION_DIVIDER,
-            f"**[SCORE]** **{_format_classifier_probability(result)}**",
-        ]
-    )
+    return f"**[SCORE]** **{_format_classifier_probability(result)}**"
 
 
 def _format_classifier_probability(result: DetectionResult) -> str:
@@ -379,11 +375,37 @@ def _format_classifier_probability(result: DetectionResult) -> str:
     return "Not evaluated"
 
 
-def _format_action_taken(action_taken: str) -> str:
+def _format_risk_summary(result: DetectionResult) -> str:
+    if result.rule_score is None:
+        return "**[RISK]** **None**"
+
+    return "\n\n".join(
+        [
+            f"**[RISK]** **{_humanize_label(result.rule_score.level.value)}**",
+            f"**Rule score:** {result.rule_score.score}",
+            f"**Band:** {_humanize_label(result.decision.band.value)}",
+            f"**Signals:** {_format_key_signals(result.rule_score.reasons)}",
+        ]
+    )
+
+
+def _format_key_signals(reasons: list[str], limit: int = 4) -> str:
+    if not reasons:
+        return "none"
+
+    shown = [_humanize_label(reason) for reason in reasons[:limit]]
+    if len(reasons) > limit:
+        shown.append(f"+{len(reasons) - limit} more")
+    return ", ".join(shown)
+
+
+def _format_action_taken(result: DetectionResult, action_taken: str) -> str:
     return "\n".join(
         [
-            SECTION_DIVIDER,
             f"**[ACTION]** **{_humanize_action_taken(action_taken)}**",
+            "",
+            f"**Decision:** {_humanize_label(result.decision.action.value)}",
+            f"**Reason:** {_humanize_label(result.decision.reason)}",
         ]
     )
 
@@ -401,7 +423,16 @@ def _humanize_action_taken(action_taken: str) -> str:
 
 
 def _humanize_label(value: str) -> str:
-    return value.replace("_", " ").title()
+    label = value.replace("_", " ").replace(":", ": ").title()
+    replacements = {
+        "Dm": "DM",
+        "Id": "ID",
+        "Ml": "ML",
+        "Url": "URL",
+    }
+    for old, new in replacements.items():
+        label = label.replace(old, new)
+    return label
 
 
 def _build_moderation_log_view(message: discord.Message) -> discord.ui.View | None:
